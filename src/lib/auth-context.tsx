@@ -1,0 +1,115 @@
+"use client";
+
+import {
+  createContext,
+  useContext,
+  useEffect,
+  useState,
+  ReactNode,
+  useCallback,
+} from "react";
+import {
+  onAuthStateChanged,
+  signInWithEmailAndPassword,
+  createUserWithEmailAndPassword,
+  sendPasswordResetEmail,
+  updateProfile,
+  signOut as firebaseSignOut,
+  User as FirebaseUser,
+} from "firebase/auth";
+import { doc, onSnapshot, setDoc, serverTimestamp } from "firebase/firestore";
+import { auth, db } from "./firebase";
+import type { User } from "@/types";
+
+interface AuthContextValue {
+  user: FirebaseUser | null;
+  profile: User | null;
+  loading: boolean;
+  signIn: (email: string, password: string) => Promise<void>;
+  signUp: (name: string, email: string, password: string) => Promise<void>;
+  resetPassword: (email: string) => Promise<void>;
+  signOut: () => Promise<void>;
+}
+
+const AuthContext = createContext<AuthContextValue>({
+  user: null,
+  profile: null,
+  loading: true,
+  signIn: async () => {},
+  signUp: async () => {},
+  resetPassword: async () => {},
+  signOut: async () => {},
+});
+
+export function AuthProvider({ children }: { children: ReactNode }) {
+  const [user, setUser] = useState<FirebaseUser | null>(null);
+  const [profile, setProfile] = useState<User | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    const unsub = onAuthStateChanged(auth, (fbUser) => {
+      setUser(fbUser);
+      if (!fbUser) {
+        setProfile(null);
+        setLoading(false);
+      }
+    });
+    return () => unsub();
+  }, []);
+
+  useEffect(() => {
+    if (!user) return;
+    const ref = doc(db, "users", user.uid);
+    const unsub = onSnapshot(
+      ref,
+      (snap) => {
+        if (snap.exists()) {
+          setProfile({ id: snap.id, ...(snap.data() as Omit<User, "id">) });
+        } else {
+          setProfile(null);
+        }
+        setLoading(false);
+      },
+      () => setLoading(false)
+    );
+    return () => unsub();
+  }, [user]);
+
+  const signIn = useCallback(async (email: string, password: string) => {
+    await signInWithEmailAndPassword(auth, email, password);
+  }, []);
+
+  const signUp = useCallback(async (name: string, email: string, password: string) => {
+    const credential = await createUserWithEmailAndPassword(auth, email, password);
+    await updateProfile(credential.user, { displayName: name });
+    await setDoc(doc(db, "users", credential.user.uid), {
+      name,
+      email,
+      role: "visualizador",
+      avatarUrl: "",
+      department: "",
+      lastActive: serverTimestamp(),
+      createdAt: serverTimestamp(),
+    });
+  }, []);
+
+  const resetPassword = useCallback(async (email: string) => {
+    await sendPasswordResetEmail(auth, email);
+  }, []);
+
+  const signOut = useCallback(async () => {
+    await firebaseSignOut(auth);
+  }, []);
+
+  return (
+    <AuthContext.Provider
+      value={{ user, profile, loading, signIn, signUp, resetPassword, signOut }}
+    >
+      {children}
+    </AuthContext.Provider>
+  );
+}
+
+export function useAuth() {
+  return useContext(AuthContext);
+}
