@@ -91,8 +91,8 @@ export function renderEmailReportHtml({
   fields,
   senderName,
   images = [],
-  logoLeftUrl = "/CIM COmpartilado.png",
-  logoRightUrl = "/Petrobras.png",
+  logoLeftUrl = "https://fluxocriticos.vercel.app/cim-compartilhado.png",
+  logoRightUrl = "https://fluxocriticos.vercel.app/petrobras.png",
 }: EmailTemplateData): string {
   const generalFields = fields
     .slice()
@@ -178,7 +178,7 @@ export function renderEmailReportHtml({
             <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color:#ffffff;border:1px solid #e5e7eb;border-radius:8px;">
               <tr>
                 <td style="padding:6px;">
-                  <img src="${img.cid ? `cid:${img.cid}` : img.url}" alt="${escapeHtml(img.name)}" width="180" style="display:block;width:100%;height:120px;object-fit:cover;border-radius:6px;" />
+                  <img src="${img.cid ? `cid:${img.cid}` : img.url}" alt="${escapeHtml(img.name)}" width="180" height="120" style="display:block;border:0;outline:none;text-decoration:none;width:100%;height:120px;object-fit:cover;border-radius:6px;" />
                 </td>
               </tr>
             </table>
@@ -217,14 +217,14 @@ export function renderEmailReportHtml({
       <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
         <tr>
           <td width="180" valign="middle" align="left">
-            <img src="${logoLeftUrl}" alt="CIM Compartilhado" width="160" style="display:block;width:160px;height:auto;" />
+            <img src="${logoLeftUrl}" alt="CIM Compartilhado" width="160" height="53" style="display:block;border:0;outline:none;text-decoration:none;width:160px;height:auto;" />
           </td>
           <td valign="middle" align="center" style="padding:0 12px;">
             <div style="font-family:Georgia,'Times New Roman',serif;color:${NAVY};font-size:21px;font-weight:bold;letter-spacing:0.02em;line-height:1.3;text-align:center;">Fluxo de Equipamentos Críticos</div>
             <div style="font-family:Arial,Helvetica,sans-serif;color:#64748b;font-size:12px;letter-spacing:0.08em;text-transform:uppercase;margin-top:6px;text-align:center;">Relatório de Registro</div>
           </td>
           <td width="130" valign="middle" align="right">
-            <img src="${logoRightUrl}" alt="Petrobras" width="104" style="display:block;width:104px;height:auto;" />
+            <img src="${logoRightUrl}" alt="Petrobras" width="104" height="35" style="display:block;border:0;outline:none;text-decoration:none;width:104px;height:auto;" />
           </td>
         </tr>
       </table>
@@ -284,7 +284,7 @@ export function renderEmailReportHtml({
       <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
         <tr>
           <td width="70" valign="top">
-            <img src="${logoLeftUrl}" alt="Logo" width="52" style="display:block;width:52px;height:auto;opacity:0.85;" />
+            <img src="${logoLeftUrl}" alt="Logo" width="52" height="17" style="display:block;border:0;outline:none;text-decoration:none;width:52px;height:auto;opacity:0.85;" />
           </td>
           <td valign="top">
             <div style="font-family:Arial,Helvetica,sans-serif;font-size:12px;color:#374151;font-weight:bold;">Fluxo de Equipamentos Críticos</div>

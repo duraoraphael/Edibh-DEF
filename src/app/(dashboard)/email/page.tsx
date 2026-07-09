@@ -112,14 +112,11 @@ export default function EmailPage() {
 
   const previewHtml = useMemo(() => {
     if (!selected) return "";
-    const origin = typeof window !== "undefined" ? window.location.origin : "";
     return renderEmailReportHtml({
       record: selected,
       fields: sortedFields,
       senderName: profile?.name,
       images,
-      logoLeftUrl: `${origin}/CIM COmpartilado.png`,
-      logoRightUrl: `${origin}/Petrobras.png`,
     });
   }, [selected, sortedFields, profile?.name, images]);
 
