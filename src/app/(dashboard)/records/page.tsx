@@ -16,12 +16,14 @@ import {
   Pencil,
   Search,
   Trash2,
+  Upload,
 } from "lucide-react";
 import * as XLSX from "xlsx";
 import { db } from "@/lib/firebase";
 import { logsCol, recordsCol } from "@/lib/firestore-helpers";
 import { useAuth } from "@/lib/auth-context";
 import { DEFAULT_FORM_ID } from "@/lib/forms";
+import { ExcelImportDialog } from "@/components/records/excel-import-dialog";
 import { generateRecordPdf, generateRecordsTablePdf } from "@/lib/pdf";
 import type { AppRecord, FormDefinition, FormField, LogEntry, RecordStatus } from "@/types";
 import { Input } from "@/components/ui/input";
@@ -101,6 +103,7 @@ export default function RecordsHistoryPage() {
   const [formFields, setFormFields] = useState<FormField[]>([]);
   const [logs, setLogs] = useState<LogEntry[]>([]);
   const [logsLoading, setLogsLoading] = useState(false);
+  const [importOpen, setImportOpen] = useState(false);
 
   useEffect(() => {
     const unsub = onSnapshot(doc(db, "formFields", DEFAULT_FORM_ID), (snap) => {
@@ -328,6 +331,10 @@ export default function RecordsHistoryPage() {
           <p className="text-sm text-muted-foreground">Consulte todos os registros submetidos</p>
         </div>
         <div className="flex gap-2">
+          <Button variant="outline" onClick={() => setImportOpen(true)}>
+            <Upload className="h-4 w-4" />
+            Importar Excel
+          </Button>
           <Button variant="outline" onClick={exportExcel}>
             <FileSpreadsheet className="h-4 w-4" />
             Exportar Excel
@@ -625,6 +632,14 @@ export default function RecordsHistoryPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <ExcelImportDialog
+        open={importOpen}
+        onOpenChange={setImportOpen}
+        formId={DEFAULT_FORM_ID}
+        authorId={user?.uid}
+        onImported={() => setImportOpen(false)}
+      />
     </div>
   );
 }
