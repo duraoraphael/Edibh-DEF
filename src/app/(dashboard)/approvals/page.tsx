@@ -50,10 +50,10 @@ export default function ApprovalsPage() {
   }, []);
 
   useEffect(() => {
-    if (!expanded) {
-      setLogs([]);
-      return;
-    }
+    // Logs are only rendered while `expanded` is set (see JSX below), so it is
+    // safe to leave stale data in state when collapsed instead of clearing it
+    // synchronously here — avoids a cascading render on every toggle.
+    if (!expanded) return;
     const unsub = onSnapshot(
       query(logsCol(), where("recordId", "==", expanded), orderBy("createdAt", "desc")),
       (snap) => setLogs(snap.docs.map((d) => d.data())),

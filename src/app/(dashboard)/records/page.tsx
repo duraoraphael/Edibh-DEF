@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { addDoc, deleteDoc, doc, onSnapshot, orderBy, query, setDoc, where } from "firebase/firestore";
 import { toast } from "sonner";
@@ -102,7 +102,7 @@ export default function RecordsHistoryPage() {
   const [deleteTarget, setDeleteTarget] = useState<AppRecord | null>(null);
   const [formFields, setFormFields] = useState<FormField[]>([]);
   const [logs, setLogs] = useState<LogEntry[]>([]);
-  const [logsLoading, setLogsLoading] = useState(false);
+  const [logsLoadedForId, setLogsLoadedForId] = useState<string | null>(null);
   const [importOpen, setImportOpen] = useState(false);
 
   useEffect(() => {
@@ -125,35 +125,38 @@ export default function RecordsHistoryPage() {
   }, []);
 
   useEffect(() => {
-    if (!selected) {
-      setLogs([]);
-      return;
-    }
-    setLogsLoading(true);
+    // The audit log panel is only rendered while `selected` is set (see the
+    // dialog below), so stale log data left in state while the dialog is
+    // closed is harmless — avoids a synchronous setState on every close.
+    if (!selected) return;
     const unsub = onSnapshot(
       query(logsCol(), where("recordId", "==", selected.id), orderBy("createdAt", "desc")),
       (snap) => {
         setLogs(snap.docs.map((d) => d.data()));
-        setLogsLoading(false);
+        setLogsLoadedForId(selected.id);
       },
-      () => setLogsLoading(false)
+      () => setLogsLoadedForId(selected.id)
     );
     return () => unsub();
   }, [selected]);
 
+  const logsLoading = !!selected && logsLoadedForId !== selected.id;
+
   const submitted = useMemo(() => records.filter((r) => r.status !== "rascunho"), [records]);
 
-  const distinct = (key: string) =>
-    Array.from(new Set(submitted.map((r) => fieldValue(r, key)).filter(Boolean))).sort();
+  const distinct = useCallback(
+    (key: string) => Array.from(new Set(submitted.map((r) => fieldValue(r, key)).filter(Boolean))).sort(),
+    [submitted]
+  );
 
   const responsaveis = useMemo(
     () => Array.from(new Set(submitted.map((r) => r.authorName).filter(Boolean))) as string[],
     [submitted]
   );
-  const gerencias = useMemo(() => distinct("gerencia"), [submitted]);
-  const instalacoes = useMemo(() => distinct("instalacao"), [submitted]);
-  const sistemas = useMemo(() => distinct("sistema"), [submitted]);
-  const equipamentos = useMemo(() => distinct("equipamento"), [submitted]);
+  const gerencias = useMemo(() => distinct("gerencia"), [distinct]);
+  const instalacoes = useMemo(() => distinct("instalacao"), [distinct]);
+  const sistemas = useMemo(() => distinct("sistema"), [distinct]);
+  const equipamentos = useMemo(() => distinct("equipamento"), [distinct]);
 
   const filtered = useMemo(() => {
     let list = submitted;

@@ -4,7 +4,8 @@ import { useState, useEffect } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { motion } from "framer-motion";
-import { Leaf, Loader2 } from "lucide-react";
+import Image from "next/image";
+import { Loader2 } from "lucide-react";
 import { toast } from "sonner";
 import { useAuth } from "@/lib/auth-context";
 import { Button } from "@/components/ui/button";
@@ -48,9 +49,11 @@ export default function LoginPage() {
         <Card className="p-8 shadow-xl">
           <div className="mb-8 flex flex-col items-center gap-3">
             <div className="flex h-14 w-14 items-center justify-center rounded-2xl  text-white ">
-              <img
+              <Image
                 src="/Simbolo eng verde.svg"
                 alt="Simbolo Normatel"
+                width={56}
+                height={56}
                 className="h-full w-full object-contain"
               />
             </div>

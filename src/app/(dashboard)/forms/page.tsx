@@ -457,12 +457,17 @@ function OptionsInput({
   options: string[];
   onCommit: (options: string[]) => void;
 }) {
-  const [draft, setDraft] = useState(options.join(", "));
+  const optionsKey = options.join(", ");
+  const [draft, setDraft] = useState(optionsKey);
   const [focused, setFocused] = useState(false);
 
-  useEffect(() => {
-    if (!focused) setDraft(options.join(", "));
-  }, [options, focused]);
+  // Keep the draft synced with `options` whenever it changes externally,
+  // unless the user is actively editing. Adjusted during render (React's
+  // recommended pattern) instead of an effect to avoid a cascading render.
+  // See: https://react.dev/learn/you-might-not-need-an-effect#adjusting-some-state-when-a-prop-changes
+  if (!focused && draft !== optionsKey) {
+    setDraft(optionsKey);
+  }
 
   function commit(text: string) {
     onCommit(

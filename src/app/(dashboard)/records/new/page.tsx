@@ -82,8 +82,29 @@ export default function NewRecordPage() {
 
   const [activeForm, setActiveForm] = useState<FormDefinition | null>(null);
   const [formsLoading, setFormsLoading] = useState(true);
-  const [values, setValues] = useState<Record<string, unknown>>({});
-  const [attachments, setAttachments] = useState<AttachmentRef[]>([]);
+  // When editing an existing record, values/attachments are populated from
+  // Firestore in the effect below. Otherwise, restore any locally saved
+  // draft synchronously on first render.
+  const [values, setValues] = useState<Record<string, unknown>>(() => {
+    if (editId || typeof window === "undefined") return {};
+    const raw = window.localStorage.getItem(`edibh_draft_${draftId}`);
+    if (!raw) return {};
+    try {
+      return JSON.parse(raw).values ?? {};
+    } catch {
+      return {};
+    }
+  });
+  const [attachments, setAttachments] = useState<AttachmentRef[]>(() => {
+    if (editId || typeof window === "undefined") return [];
+    const raw = window.localStorage.getItem(`edibh_draft_${draftId}`);
+    if (!raw) return [];
+    try {
+      return JSON.parse(raw).attachments ?? [];
+    } catch {
+      return [];
+    }
+  });
   const [existingRecordNumber, setExistingRecordNumber] = useState<string | undefined>();
   const [uploadProgress, setUploadProgress] = useState<Record<string, number>>({});
   const [dragActive, setDragActive] = useState(false);
@@ -97,8 +118,21 @@ export default function NewRecordPage() {
     const unsub = onSnapshot(
       doc(db, "formFields", DEFAULT_FORM_ID),
       (snap) => {
-        setActiveForm(snap.exists() ? (snap.data() as FormDefinition) : null);
+        const form = snap.exists() ? (snap.data() as FormDefinition) : null;
+        setActiveForm(form);
         setFormsLoading(false);
+        // Fill in defaults for any fields that don't have a value yet. Done
+        // here (inside the subscription callback) rather than in a separate
+        // effect so this only runs when the form actually changes.
+        if (form) {
+          setValues((prev) => {
+            const next = { ...prev };
+            for (const field of form.fields) {
+              if (!(field.key in next)) next[field.key] = defaultValueFor(field);
+            }
+            return next;
+          });
+        }
       },
       (error) => {
         logFirestoreError({ fn: "NewRecordPage:loadForm" }, error);
@@ -109,36 +143,15 @@ export default function NewRecordPage() {
   }, []);
 
   useEffect(() => {
-    if (!activeForm) return;
-    setValues((prev) => {
-      const next = { ...prev };
-      for (const field of activeForm.fields) {
-        if (!(field.key in next)) next[field.key] = defaultValueFor(field);
-      }
-      return next;
+    if (!editId) return;
+    getDoc(doc(db, "records", editId)).then((snap) => {
+      if (!snap.exists()) return;
+      const data = snap.data() as AppRecord;
+      setValues(data.data || {});
+      setAttachments(data.attachments || []);
+      setExistingRecordNumber(data.recordNumber);
     });
-  }, [activeForm]);
-
-  useEffect(() => {
-    if (editId) {
-      getDoc(doc(db, "records", editId)).then((snap) => {
-        if (!snap.exists()) return;
-        const data = snap.data() as AppRecord;
-        setValues(data.data || {});
-        setAttachments(data.attachments || []);
-        setExistingRecordNumber(data.recordNumber);
-      });
-      return;
-    }
-    const raw = window.localStorage.getItem(`edibh_draft_${draftId}`);
-    if (raw) {
-      try {
-        const parsed = JSON.parse(raw);
-        setValues(parsed.values ?? {});
-        setAttachments(parsed.attachments ?? []);
-      } catch {}
-    }
-  }, [draftId, editId]);
+  }, [editId]);
 
   const persistDraft = useCallback(
     async (nextValues: Record<string, unknown>, atts: AttachmentRef[]) => {
@@ -184,7 +197,9 @@ export default function NewRecordPage() {
 
   async function handleFieldFile(field: FormField, file: File | null) {
     if (!file || !user) return;
-    const path = `attachments/${user.uid}/${draftId}/${field.key}_${Date.now()}_${file.name}`;
+    // Use a random id instead of Date.now() to keep this function pure for
+    // React's compiler-purity checks and avoid any (unlikely) path collision.
+    const path = `attachments/${user.uid}/${draftId}/${field.key}_${crypto.randomUUID()}_${file.name}`;
     const storageRef = ref(storage, path);
     const task = uploadBytesResumable(storageRef, file);
     task.on(

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useRef, useState } from "react";
 import { doc, setDoc } from "firebase/firestore";
 import {
   EmailAuthProvider,
@@ -27,8 +27,21 @@ import {
 
 export default function ProfilePage() {
   const { user, profile } = useAuth();
-  const [name, setName] = useState("");
-  const [department, setDepartment] = useState("");
+  // Keying on profile.id makes the form remount (and re-initialize its local
+  // `name`/`department` state from the fresh profile) whenever a different
+  // profile loads, instead of syncing via an effect.
+  return <ProfileFields key={profile?.id ?? "loading"} user={user} profile={profile} />;
+}
+
+function ProfileFields({
+  user,
+  profile,
+}: {
+  user: ReturnType<typeof useAuth>["user"];
+  profile: ReturnType<typeof useAuth>["profile"];
+}) {
+  const [name, setName] = useState(profile?.name || "");
+  const [department, setDepartment] = useState(profile?.department || "");
   const [saving, setSaving] = useState(false);
   const [uploading, setUploading] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
@@ -37,11 +50,6 @@ export default function ProfilePage() {
   const [currentPassword, setCurrentPassword] = useState("");
   const [newPassword, setNewPassword] = useState("");
   const [changingPassword, setChangingPassword] = useState(false);
-
-  useEffect(() => {
-    setName(profile?.name || "");
-    setDepartment(profile?.department || "");
-  }, [profile]);
 
   async function handleSave() {
     if (!user) return;
