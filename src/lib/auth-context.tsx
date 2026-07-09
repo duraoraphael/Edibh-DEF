@@ -17,7 +17,7 @@ import {
   signOut as firebaseSignOut,
   User as FirebaseUser,
 } from "firebase/auth";
-import { doc, onSnapshot, setDoc, serverTimestamp } from "firebase/firestore";
+import { doc, onSnapshot, setDoc, updateDoc, serverTimestamp } from "firebase/firestore";
 import { auth, db } from "./firebase";
 import type { User } from "@/types";
 
@@ -52,6 +52,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       if (!fbUser) {
         setProfile(null);
         setLoading(false);
+      } else {
+        updateDoc(doc(db, "users", fbUser.uid), { lastActive: serverTimestamp() }).catch(() => {});
       }
     });
     return () => unsub();
@@ -76,7 +78,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [user]);
 
   const signIn = useCallback(async (email: string, password: string) => {
-    await signInWithEmailAndPassword(auth, email, password);
+    const credential = await signInWithEmailAndPassword(auth, email, password);
+    await updateDoc(doc(db, "users", credential.user.uid), {
+      lastActive: serverTimestamp(),
+    }).catch(() => {});
   }, []);
 
   const signUp = useCallback(async (name: string, email: string, password: string) => {

@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import { deleteDoc, doc, onSnapshot, orderBy, query, setDoc } from "firebase/firestore";
+import { addDoc, deleteDoc, doc, onSnapshot, orderBy, query, setDoc, where } from "firebase/firestore";
 import { toast } from "sonner";
 import {
   ArrowDown,
@@ -19,11 +19,11 @@ import {
 } from "lucide-react";
 import * as XLSX from "xlsx";
 import { db } from "@/lib/firebase";
-import { recordsCol } from "@/lib/firestore-helpers";
+import { logsCol, recordsCol } from "@/lib/firestore-helpers";
 import { useAuth } from "@/lib/auth-context";
 import { DEFAULT_FORM_ID } from "@/lib/forms";
 import { generateRecordPdf, generateRecordsTablePdf } from "@/lib/pdf";
-import type { AppRecord, FormDefinition, FormField, RecordStatus } from "@/types";
+import type { AppRecord, FormDefinition, FormField, LogEntry, RecordStatus } from "@/types";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -36,7 +36,6 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { Drawer, DrawerContent, DrawerHeader, DrawerTitle } from "@/components/ui/drawer";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -57,7 +56,7 @@ const statusLabels: Record<RecordStatus, string> = {
   pendente: "Em análise",
   aprovado: "Aprovado",
   rejeitado: "Reprovado",
-  ajuste: "Finalizado",
+  reajuste: "Aguardando Reajuste",
 };
 
 const statusVariant: Record<RecordStatus, "default" | "warning" | "success" | "destructive" | "secondary"> = {
@@ -65,7 +64,7 @@ const statusVariant: Record<RecordStatus, "default" | "warning" | "success" | "d
   pendente: "warning",
   aprovado: "success",
   rejeitado: "destructive",
-  ajuste: "default",
+  reajuste: "warning",
 };
 
 type SortKey = "recordNumber" | "authorName" | "status" | "createdAt";
@@ -100,6 +99,8 @@ export default function RecordsHistoryPage() {
   const [selected, setSelected] = useState<AppRecord | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<AppRecord | null>(null);
   const [formFields, setFormFields] = useState<FormField[]>([]);
+  const [logs, setLogs] = useState<LogEntry[]>([]);
+  const [logsLoading, setLogsLoading] = useState(false);
 
   useEffect(() => {
     const unsub = onSnapshot(doc(db, "formFields", DEFAULT_FORM_ID), (snap) => {
@@ -119,6 +120,23 @@ export default function RecordsHistoryPage() {
     );
     return () => unsub();
   }, []);
+
+  useEffect(() => {
+    if (!selected) {
+      setLogs([]);
+      return;
+    }
+    setLogsLoading(true);
+    const unsub = onSnapshot(
+      query(logsCol(), where("recordId", "==", selected.id), orderBy("createdAt", "desc")),
+      (snap) => {
+        setLogs(snap.docs.map((d) => d.data()));
+        setLogsLoading(false);
+      },
+      () => setLogsLoading(false)
+    );
+    return () => unsub();
+  }, [selected]);
 
   const submitted = useMemo(() => records.filter((r) => r.status !== "rascunho"), [records]);
 
@@ -241,7 +259,6 @@ export default function RecordsHistoryPage() {
     const newId = crypto.randomUUID();
     try {
       await setDoc(doc(db, "records", newId), {
-        title: `${r.title} (cópia)`,
         status: "rascunho",
         authorId: user?.uid || r.authorId,
         authorName: profile?.name || r.authorName,
@@ -260,6 +277,15 @@ export default function RecordsHistoryPage() {
 
   async function deleteRecord(r: AppRecord) {
     try {
+      await addDoc(logsCol(), {
+        id: "",
+        recordId: r.id,
+        action: "Excluído",
+        actorId: user?.uid,
+        actorName: profile?.name || user?.email || undefined,
+        detail: r.recordNumber,
+        createdAt: new Date().toISOString(),
+      });
       await deleteDoc(doc(db, "records", r.id));
       toast.success("Registro excluído");
       setDeleteTarget(null);
@@ -490,49 +516,96 @@ export default function RecordsHistoryPage() {
         </div>
       )}
 
-      <Drawer open={!!selected} onOpenChange={(o) => !o && setSelected(null)}>
-        <DrawerContent>
+      <Dialog open={!!selected} onOpenChange={(o) => !o && setSelected(null)}>
+        <DialogContent className="grid h-[92vh] w-[95vw] max-w-6xl grid-rows-[auto_1fr] gap-0 overflow-hidden p-0">
           {selected && (
             <>
-              <DrawerHeader>
-                <DrawerTitle>
-                  {selected.recordNumber} — {selected.title}
-                </DrawerTitle>
-              </DrawerHeader>
-              <div className="mt-4 flex flex-col gap-4 text-sm">
-                <div className="flex items-center gap-2">
+              <DialogHeader className="border-b border-border px-6 py-4">
+                <DialogTitle className="flex items-center gap-3">
+                  {selected.recordNumber || selected.id}
                   <Badge variant={statusVariant[selected.status]}>{statusLabels[selected.status]}</Badge>
-                  <span className="text-muted-foreground">{selected.authorName || "—"}</span>
-                </div>
-                {Object.entries(selected.data || {}).map(([key, value]) => (
-                  <div key={key}>
-                    <p className="text-xs font-medium text-muted-foreground">{key}</p>
-                    <p className="whitespace-pre-wrap">
-                      {Array.isArray(value) ? value.join(", ") : String(value ?? "—")}
-                    </p>
+                </DialogTitle>
+                <p className="text-sm text-muted-foreground">Responsável: {selected.authorName || "—"}</p>
+              </DialogHeader>
+              <div className="grid min-h-0 grid-cols-1 lg:grid-cols-[1.4fr_1fr]">
+                <div className="flex flex-col gap-5 overflow-y-auto border-b border-border p-6 lg:border-b-0 lg:border-r">
+                  <div>
+                    <h3 className="mb-2 text-sm font-semibold">Campos preenchidos</h3>
+                    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                      {Object.entries(selected.data || {}).map(([key, value]) => (
+                        <div key={key} className="rounded-lg border border-border p-3">
+                          <p className="text-xs font-medium text-muted-foreground">{key}</p>
+                          <p className="whitespace-pre-wrap text-sm">
+                            {Array.isArray(value) ? value.join(", ") : String(value ?? "—")}
+                          </p>
+                        </div>
+                      ))}
+                    </div>
                   </div>
-                ))}
-                <div>
-                  <p className="text-xs font-medium text-muted-foreground">Anexos</p>
-                  {!selected.attachments || selected.attachments.length === 0 ? (
-                    <p className="text-muted-foreground">Nenhum anexo</p>
+                  <div>
+                    <h3 className="mb-2 text-sm font-semibold">Anexos e fotos</h3>
+                    {!selected.attachments || selected.attachments.length === 0 ? (
+                      <p className="text-sm text-muted-foreground">Nenhum anexo</p>
+                    ) : (
+                      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+                        {selected.attachments.map((a) => {
+                          const isImage =
+                            /\.(png|jpe?g|gif|webp)$/i.test(a.name) || a.contentType?.startsWith("image/");
+                          return (
+                            <a
+                              key={a.name}
+                              href={a.url}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="flex flex-col gap-1 rounded-lg border border-border p-2 hover:border-primary"
+                            >
+                              {isImage ? (
+                                // eslint-disable-next-line @next/next/no-img-element
+                                <img src={a.url} alt={a.name} className="h-24 w-full rounded-md object-cover" />
+                              ) : (
+                                <div className="flex h-24 w-full items-center justify-center rounded-md bg-muted text-xs text-muted-foreground">
+                                  Arquivo
+                                </div>
+                              )}
+                              <span className="truncate text-xs">{a.name}</span>
+                            </a>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                <div className="flex flex-col overflow-y-auto p-6">
+                  <h3 className="mb-3 text-sm font-semibold">Log de auditoria</h3>
+                  {logsLoading ? (
+                    <div className="flex flex-col gap-2">
+                      {Array.from({ length: 4 }).map((_, i) => (
+                        <Skeleton key={i} className="h-14 w-full" />
+                      ))}
+                    </div>
+                  ) : logs.length === 0 ? (
+                    <p className="text-sm text-muted-foreground">Nenhuma ação registrada para este registro</p>
                   ) : (
-                    <ul className="flex flex-col gap-1">
-                      {selected.attachments.map((a) => (
-                        <li key={a.name}>
-                          <a href={a.url} target="_blank" rel="noreferrer" className="text-primary underline-offset-4 hover:underline">
-                            {a.name}
-                          </a>
+                    <ol className="relative flex flex-col gap-5 border-l-2 border-border pl-4">
+                      {logs.map((l) => (
+                        <li key={l.id} className="relative">
+                          <span className="absolute -left-[21px] top-1 h-2.5 w-2.5 rounded-full bg-primary" />
+                          <p className="text-sm font-medium">{l.action}</p>
+                          <p className="text-xs text-muted-foreground">
+                            {l.actorName || "—"} · {l.createdAt ? new Date(l.createdAt).toLocaleString() : "—"}
+                          </p>
+                          {l.detail && <p className="mt-1 text-xs italic text-muted-foreground">&ldquo;{l.detail}&rdquo;</p>}
                         </li>
                       ))}
-                    </ul>
+                    </ol>
                   )}
                 </div>
               </div>
             </>
           )}
-        </DrawerContent>
-      </Drawer>
+        </DialogContent>
+      </Dialog>
 
       <Dialog open={!!deleteTarget} onOpenChange={(o) => !o && setDeleteTarget(null)}>
         <DialogContent>

@@ -1,6 +1,6 @@
 import { doc, runTransaction } from "firebase/firestore";
 import { db } from "./firebase";
-import type { FormField, FormFieldType } from "@/types";
+import type { FormField, FormFieldType, UserRole } from "@/types";
 
 export const DEFAULT_FORM_ID = "default";
 
@@ -68,6 +68,28 @@ export const fieldTypeLabels: Record<FormFieldType, string> = {
 };
 
 export const optionBasedTypes: FormFieldType[] = ["selecao", "multipla_escolha", "radio"];
+
+export const roleLabels: Record<UserRole, string> = {
+  admin: "Administrador",
+  gerente: "Gerente",
+  tecnico: "Técnico de Operações",
+  visualizador: "Visualizador",
+};
+
+/** Routes each role may access. `null` = all authenticated users. Used by both sidebar and route-guard. */
+export const allowedRoutesByRole: Record<UserRole, string[] | null> = {
+  admin: null,
+  gerente: null,
+  visualizador: null,
+  tecnico: ["/dashboard", "/records", "/records/new", "/profile"],
+};
+
+export function isRouteAllowed(role: UserRole | undefined, pathname: string): boolean {
+  if (!role) return false;
+  const allowed = allowedRoutesByRole[role];
+  if (!allowed) return true;
+  return allowed.some((r) => pathname === r || pathname.startsWith(r + "/"));
+}
 
 export function slugifyKey(label: string): string {
   return (

@@ -294,15 +294,69 @@ export default function FormsManagerPage() {
                     </div>
 
                     {optionBasedTypes.includes(field.type) && (
-                      <Input
-                        placeholder="Opções separadas por vírgula"
-                        value={(field.options || []).join(", ")}
-                        onChange={(e) =>
-                          updateField(field.id, {
-                            options: e.target.value.split(",").map((o) => o.trim()).filter(Boolean),
-                          })
-                        }
+                      <OptionsInput
+                        options={field.options || []}
+                        onCommit={(options) => updateField(field.id, { options })}
                       />
+                    )}
+
+                    {optionBasedTypes.includes(field.type) && (
+                      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                        <div className="flex flex-col gap-1.5">
+                          <Label className="text-xs text-muted-foreground">Depende do campo</Label>
+                          <Select
+                            value={field.dependsOnFieldId || "__none__"}
+                            onValueChange={(v) =>
+                              updateField(field.id, {
+                                dependsOnFieldId: v === "__none__" ? undefined : v,
+                                optionsByParentValue: v === "__none__" ? undefined : field.optionsByParentValue,
+                              })
+                            }
+                          >
+                            <SelectTrigger>
+                              <SelectValue placeholder="Nenhum" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="__none__">Nenhum</SelectItem>
+                              {fields
+                                .filter((f) => f.id !== field.id && optionBasedTypes.includes(f.type))
+                                .map((f) => (
+                                  <SelectItem key={f.id} value={f.id}>
+                                    {f.label}
+                                  </SelectItem>
+                                ))}
+                            </SelectContent>
+                          </Select>
+                        </div>
+
+                        {field.dependsOnFieldId && (
+                          <div className="flex flex-col gap-2 sm:col-span-2">
+                            <Label className="text-xs text-muted-foreground">
+                              Opções por valor do campo pai
+                            </Label>
+                            {(fields.find((f) => f.id === field.dependsOnFieldId)?.options || []).map(
+                              (parentOption) => (
+                                <div key={parentOption} className="flex items-center gap-2">
+                                  <span className="w-32 shrink-0 truncate text-xs text-muted-foreground">
+                                    {parentOption}
+                                  </span>
+                                  <OptionsInput
+                                    options={field.optionsByParentValue?.[parentOption] || []}
+                                    onCommit={(opts) =>
+                                      updateField(field.id, {
+                                        optionsByParentValue: {
+                                          ...(field.optionsByParentValue || {}),
+                                          [parentOption]: opts,
+                                        },
+                                      })
+                                    }
+                                  />
+                                </div>
+                              )
+                            )}
+                          </div>
+                        )}
+                      </div>
                     )}
 
                     <div className="flex items-center justify-between border-t border-border pt-3">
@@ -393,6 +447,43 @@ export default function FormsManagerPage() {
         </DialogContent>
       </Dialog>
     </div>
+  );
+}
+
+function OptionsInput({
+  options,
+  onCommit,
+}: {
+  options: string[];
+  onCommit: (options: string[]) => void;
+}) {
+  const [draft, setDraft] = useState(options.join(", "));
+  const [focused, setFocused] = useState(false);
+
+  useEffect(() => {
+    if (!focused) setDraft(options.join(", "));
+  }, [options, focused]);
+
+  function commit(text: string) {
+    onCommit(
+      text
+        .split(",")
+        .map((o) => o.trim())
+        .filter(Boolean)
+    );
+  }
+
+  return (
+    <Input
+      placeholder="Opções separadas por vírgula"
+      value={draft}
+      onFocus={() => setFocused(true)}
+      onChange={(e) => setDraft(e.target.value)}
+      onBlur={() => {
+        setFocused(false);
+        commit(draft);
+      }}
+    />
   );
 }
 

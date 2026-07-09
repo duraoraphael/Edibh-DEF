@@ -24,7 +24,7 @@ import {
 const actionLabels: Record<ApprovalAction, string> = {
   aprovado: "Aprovado",
   rejeitado: "Rejeitado",
-  ajuste: "Ajuste solicitado",
+  reajuste: "Reajuste solicitado",
 };
 
 export default function ApprovalsPage() {
@@ -64,8 +64,14 @@ export default function ApprovalsPage() {
 
   const pending = useMemo(() => approvals.filter((a) => a.status === "pendente"), [approvals]);
 
+  const canReview = profile?.role === "admin" || profile?.role === "gerente";
+
   async function confirmAction() {
     if (!dialogAction) return;
+    if (!canReview) {
+      toast.error("Apenas administradores e gerentes podem revisar aprovações");
+      return;
+    }
     setSubmitting(true);
     try {
       const { approval, action } = dialogAction;
@@ -112,6 +118,15 @@ export default function ApprovalsPage() {
             <Skeleton key={i} className="h-40 w-full" />
           ))}
         </div>
+      ) : !canReview ? (
+        <Card>
+          <CardContent className="flex flex-col items-center justify-center gap-2 p-12 text-center">
+            <Clock className="h-8 w-8 text-muted-foreground" />
+            <p className="text-sm text-muted-foreground">
+              Apenas administradores e gerentes podem revisar aprovações
+            </p>
+          </CardContent>
+        </Card>
       ) : pending.length === 0 ? (
         <Card>
           <CardContent className="flex flex-col items-center justify-center gap-2 p-12 text-center">
@@ -125,7 +140,7 @@ export default function ApprovalsPage() {
             <Card key={a.id}>
               <CardHeader>
                 <CardTitle className="flex items-center justify-between text-base">
-                  <span className="truncate">{a.recordTitle || a.recordId}</span>
+                  <span className="truncate">{a.recordNumber || a.recordId}</span>
                   <Badge variant="warning">Pendente</Badge>
                 </CardTitle>
               </CardHeader>
@@ -139,9 +154,9 @@ export default function ApprovalsPage() {
                     <XCircle className="h-4 w-4" />
                     Rejeitar
                   </Button>
-                  <Button size="sm" variant="outline" onClick={() => setDialogAction({ approval: a, action: "ajuste" })}>
+                  <Button size="sm" variant="outline" onClick={() => setDialogAction({ approval: a, action: "reajuste" })}>
                     <MessageSquareWarning className="h-4 w-4" />
-                    Solicitar Ajuste
+                    Solicitar Reajuste
                   </Button>
                 </div>
                 <button

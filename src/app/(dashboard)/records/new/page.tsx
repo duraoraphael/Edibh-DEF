@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { doc, getDoc, onSnapshot, serverTimestamp, setDoc } from "firebase/firestore";
+import { addDoc, doc, getDoc, onSnapshot, serverTimestamp, setDoc } from "firebase/firestore";
 import { getDownloadURL, ref, uploadBytesResumable } from "firebase/storage";
 import { toast } from "sonner";
 import { Loader2, Paperclip, UploadCloud, X } from "lucide-react";
@@ -15,6 +15,7 @@ import {
   logFirestoreError,
   sanitizeForFirestore,
 } from "@/lib/forms";
+import { logsCol } from "@/lib/firestore-helpers";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -81,7 +82,6 @@ export default function NewRecordPage() {
 
   const [activeForm, setActiveForm] = useState<FormDefinition | null>(null);
   const [formsLoading, setFormsLoading] = useState(true);
-  const [title, setTitle] = useState("");
   const [values, setValues] = useState<Record<string, unknown>>({});
   const [attachments, setAttachments] = useState<AttachmentRef[]>([]);
   const [existingRecordNumber, setExistingRecordNumber] = useState<string | undefined>();
@@ -124,7 +124,6 @@ export default function NewRecordPage() {
       getDoc(doc(db, "records", editId)).then((snap) => {
         if (!snap.exists()) return;
         const data = snap.data() as AppRecord;
-        setTitle(data.title || "");
         setValues(data.data || {});
         setAttachments(data.attachments || []);
         setExistingRecordNumber(data.recordNumber);
@@ -135,7 +134,6 @@ export default function NewRecordPage() {
     if (raw) {
       try {
         const parsed = JSON.parse(raw);
-        setTitle(parsed.title ?? "");
         setValues(parsed.values ?? {});
         setAttachments(parsed.attachments ?? []);
       } catch {}
@@ -143,15 +141,14 @@ export default function NewRecordPage() {
   }, [draftId, editId]);
 
   const persistDraft = useCallback(
-    async (nextTitle: string, nextValues: Record<string, unknown>, atts: AttachmentRef[]) => {
+    async (nextValues: Record<string, unknown>, atts: AttachmentRef[]) => {
       window.localStorage.setItem(
         `edibh_draft_${draftId}`,
-        JSON.stringify({ title: nextTitle, values: nextValues, attachments: atts })
+        JSON.stringify({ values: nextValues, attachments: atts })
       );
       if (!user) return;
       setSavingDraft(true);
       const payload = sanitizeForFirestore({
-        title: nextTitle || "Rascunho sem título",
         status: "rascunho" as const,
         authorId: user.uid,
         authorName: profile?.name || user.email || null,
@@ -173,19 +170,16 @@ export default function NewRecordPage() {
     [draftId, user, profile, activeForm]
   );
 
-  function updateTitle(value: string) {
-    setTitle(value);
-    if (debounceRef.current) clearTimeout(debounceRef.current);
-    debounceRef.current = setTimeout(() => persistDraft(value, values, attachments), 800);
-  }
-
   function updateValue(field: FormField, raw: unknown) {
     let value = raw;
     if (typeof raw === "string" && field.mask) value = applyMask(raw, field.mask);
     const next = { ...values, [field.key]: value };
+    for (const f of activeForm?.fields || []) {
+      if (f.dependsOnFieldId === field.id) next[f.key] = defaultValueFor(f);
+    }
     setValues(next);
     if (debounceRef.current) clearTimeout(debounceRef.current);
-    debounceRef.current = setTimeout(() => persistDraft(title, next, attachments), 800);
+    debounceRef.current = setTimeout(() => persistDraft(next, attachments), 800);
   }
 
   async function handleFieldFile(field: FormField, file: File | null) {
@@ -232,7 +226,7 @@ export default function NewRecordPage() {
           const url = await getDownloadURL(storageRef);
           setAttachments((prev) => {
             const next = [...prev, { name: file.name, url, size: file.size, contentType: file.type }];
-            persistDraft(title, values, next);
+            persistDraft(values, next);
             return next;
           });
           setUploadProgress((p) => {
@@ -248,16 +242,12 @@ export default function NewRecordPage() {
   function removeAttachment(name: string) {
     setAttachments((prev) => {
       const next = prev.filter((a) => a.name !== name);
-      persistDraft(title, values, next);
+      persistDraft(values, next);
       return next;
     });
   }
 
   function validateForm(): boolean {
-    if (!title.trim()) {
-      toast.error("Informe o título do registro");
-      return false;
-    }
     for (const field of activeForm?.fields || []) {
       const value = values[field.key];
       if (field.required) {
@@ -302,7 +292,6 @@ export default function NewRecordPage() {
 
       const recordPayload = sanitizeForFirestore({
         recordNumber,
-        title,
         status: "pendente" as const,
         authorId: user.uid,
         authorName: profile?.name || user.email || null,
@@ -322,7 +311,7 @@ export default function NewRecordPage() {
 
       const approvalPayload = sanitizeForFirestore({
         recordId: draftId,
-        recordTitle: title,
+        recordNumber,
         status: "pendente" as const,
         createdAt: new Date().toISOString(),
         updatedAt: serverTimestamp(),
@@ -334,6 +323,15 @@ export default function NewRecordPage() {
         toast.error("Registro salvo, mas falhou ao criar a aprovação. Veja o console para detalhes.");
         return;
       }
+
+      await addDoc(logsCol(), {
+        id: "",
+        recordId: draftId,
+        action: editId ? "Reenviado após reajuste" : "Criado",
+        actorId: user.uid,
+        actorName: profile?.name || user.email || undefined,
+        createdAt: new Date().toISOString(),
+      }).catch(() => {});
 
       window.localStorage.removeItem(`edibh_draft_${draftId}`);
       window.localStorage.removeItem("edibh_draft_id");
@@ -369,20 +367,19 @@ export default function NewRecordPage() {
 
       <SectionCard number={1} title="Dados Gerais">
         <div className="grid grid-cols-1 gap-5 md:grid-cols-2">
-          <div className="flex flex-col gap-1.5">
-            <div className="flex items-center gap-2">
-              <Label htmlFor="title">Título</Label>
-              <Badge>OBRIGATÓRIO</Badge>
-            </div>
-            <Input id="title" value={title} onChange={(e) => updateTitle(e.target.value)} placeholder="Título do registro" />
-          </div>
           {generalFields.map((field) => (
             <div key={field.id} className="flex flex-col gap-1.5">
               <div className="flex items-center gap-2">
                 <Label htmlFor={field.id}>{field.label}</Label>
                 {field.required && <Badge>OBRIGATÓRIO</Badge>}
               </div>
-              <DynamicField field={field} value={values[field.key]} onChange={(v) => updateValue(field, v)} />
+              <DynamicField
+                field={field}
+                value={values[field.key]}
+                onChange={(v) => updateValue(field, v)}
+                allFields={fields}
+                values={values}
+              />
               {field.helpText && <p className="text-xs text-muted-foreground">{field.helpText}</p>}
             </div>
           ))}
@@ -515,15 +512,31 @@ export default function NewRecordPage() {
   );
 }
 
+function resolveOptions(field: FormField, allFields?: FormField[], values?: Record<string, unknown>): string[] {
+  if (field.dependsOnFieldId && field.optionsByParentValue) {
+    const parentValue = values?.[allFields?.find((f) => f.id === field.dependsOnFieldId)?.key || ""];
+    if (typeof parentValue === "string" && parentValue) {
+      return field.optionsByParentValue[parentValue] || [];
+    }
+    return [];
+  }
+  return field.options || [];
+}
+
 function DynamicField({
   field,
   value,
   onChange,
+  allFields,
+  values,
 }: {
   field: FormField;
   value: unknown;
   onChange: (value: unknown) => void;
+  allFields?: FormField[];
+  values?: Record<string, unknown>;
 }) {
+  const options = resolveOptions(field, allFields, values);
   switch (field.type) {
     case "numero":
       return (
@@ -570,7 +583,7 @@ function DynamicField({
             <SelectValue placeholder={field.placeholder || "Selecione"} />
           </SelectTrigger>
           <SelectContent>
-            {(field.options || []).map((o) => (
+            {options.map((o) => (
               <SelectItem key={o} value={o}>
                 {o}
               </SelectItem>
@@ -581,7 +594,7 @@ function DynamicField({
     case "radio":
       return (
         <div className="flex flex-col gap-1.5">
-          {(field.options || []).map((o) => (
+          {options.map((o) => (
             <label key={o} className="flex items-center gap-2 text-sm">
               <input
                 type="radio"
@@ -598,7 +611,7 @@ function DynamicField({
       const selected = Array.isArray(value) ? (value as string[]) : [];
       return (
         <div className="flex flex-col gap-1.5">
-          {(field.options || []).map((o) => (
+          {options.map((o) => (
             <label key={o} className="flex items-center gap-2 text-sm">
               <input
                 type="checkbox"

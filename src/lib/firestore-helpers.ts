@@ -12,6 +12,7 @@ import type {
   Approval,
   FormDefinition,
   LogEntry,
+  EmailRecordLog,
 } from "@/types";
 
 function makeConverter<T extends { id: string }>(): FirestoreDataConverter<T> {
@@ -36,6 +37,7 @@ export const recordConverter = makeConverter<AppRecord>();
 export const approvalConverter = makeConverter<Approval>();
 export const formDefinitionConverter = makeConverter<FormDefinition>();
 export const logConverter = makeConverter<LogEntry>();
+export const emailLogConverter = makeConverter<EmailRecordLog>();
 
 export const usersCol = () => collection(db, "users").withConverter(userConverter);
 export const recordsCol = () => collection(db, "records").withConverter(recordConverter);
@@ -43,3 +45,4 @@ export const approvalsCol = () => collection(db, "approvals").withConverter(appr
 export const formFieldsCol = () => collection(db, "formFields").withConverter(formDefinitionConverter);
 export const settingsCol = () => collection(db, "settings");
 export const logsCol = () => collection(db, "logs").withConverter(logConverter);
+export const emailLogsCol = () => collection(db, "emailLogs").withConverter(emailLogConverter);

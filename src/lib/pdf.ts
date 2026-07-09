@@ -13,7 +13,7 @@ export const statusLabels: Record<RecordStatus, string> = {
   pendente: "Em análise",
   aprovado: "Aprovado",
   rejeitado: "Reprovado",
-  ajuste: "Finalizado",
+  reajuste: "Aguardando Reajuste",
 };
 
 async function urlToDataUrl(url: string): Promise<string | null> {
@@ -148,7 +148,7 @@ export async function generateRecordPdf(record: AppRecord, options: GenerateOpti
   doc.setFont("helvetica", "bold");
   doc.setFontSize(15);
   doc.setTextColor(...TEXT_DARK);
-  doc.text(record.title || "Registro", 14, y);
+  doc.text(record.recordNumber ? `Registro ${record.recordNumber}` : "Registro", 14, y);
   y += 6;
   doc.setFont("helvetica", "normal");
   doc.setFontSize(10);

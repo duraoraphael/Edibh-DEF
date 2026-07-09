@@ -12,7 +12,7 @@ export interface User {
   createdAt?: string;
 }
 
-export type RecordStatus = "rascunho" | "pendente" | "aprovado" | "rejeitado" | "ajuste";
+export type RecordStatus = "rascunho" | "pendente" | "aprovado" | "rejeitado" | "reajuste";
 
 export interface AttachmentRef {
   name: string;
@@ -24,7 +24,6 @@ export interface AttachmentRef {
 export interface AppRecord {
   id: string;
   recordNumber?: string;
-  title: string;
   description?: string;
   category?: string;
   status: RecordStatus;
@@ -37,12 +36,12 @@ export interface AppRecord {
   updatedAt?: string;
 }
 
-export type ApprovalAction = "aprovado" | "rejeitado" | "ajuste";
+export type ApprovalAction = "aprovado" | "rejeitado" | "reajuste";
 
 export interface Approval {
   id: string;
   recordId: string;
-  recordTitle?: string;
+  recordNumber?: string;
   status: "pendente" | ApprovalAction;
   comment?: string;
   reviewerId?: string;
@@ -77,6 +76,8 @@ export interface FormField {
   required?: boolean;
   options?: string[];
   order: number;
+  dependsOnFieldId?: string;
+  optionsByParentValue?: Record<string, string[]>;
 }
 
 export interface FormDefinition {
@@ -95,5 +96,17 @@ export interface LogEntry {
   actorId?: string;
   actorName?: string;
   detail?: string;
+  changes?: Record<string, { before: unknown; after: unknown }>;
+  createdAt?: string;
+}
+
+export interface EmailRecordLog {
+  id: string;
+  recordId: string;
+  to: string;
+  subject: string;
+  message: string;
+  senderId?: string;
+  senderName?: string;
   createdAt?: string;
 }

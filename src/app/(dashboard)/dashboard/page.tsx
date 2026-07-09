@@ -32,7 +32,7 @@ const statusLabels: Record<RecordStatus, string> = {
   pendente: "Pendente",
   aprovado: "Aprovado",
   rejeitado: "Rejeitado",
-  ajuste: "Ajuste",
+  reajuste: "Aguardando Reajuste",
 };
 
 const statusVariant: Record<RecordStatus, "default" | "warning" | "success" | "destructive" | "secondary"> = {
@@ -40,7 +40,7 @@ const statusVariant: Record<RecordStatus, "default" | "warning" | "success" | "d
   pendente: "warning",
   aprovado: "success",
   rejeitado: "destructive",
-  ajuste: "warning",
+  reajuste: "warning",
 };
 
 // alinhado ao tema: --primary-500, --warning, --destructive, --muted-foreground, --primary-300
@@ -200,7 +200,7 @@ export default function DashboardPage() {
               records.slice(0, 6).map((r) => (
                 <div key={r.id} className="flex items-center justify-between rounded-xl border border-border p-3">
                   <div className="min-w-0">
-                    <p className="truncate text-sm font-medium">{r.title}</p>
+                    <p className="truncate text-sm font-medium">{r.recordNumber || r.id}</p>
                     <p className="text-xs text-muted-foreground">{r.authorName || "—"}</p>
                   </div>
                   <Badge variant={statusVariant[r.status]}>{statusLabels[r.status]}</Badge>
@@ -225,7 +225,7 @@ export default function DashboardPage() {
                 .slice(0, 6)
                 .map((a) => (
                   <div key={a.id} className="flex items-center justify-between rounded-xl border border-border p-3">
-                    <p className="truncate text-sm font-medium">{a.recordTitle || a.recordId}</p>
+                    <p className="truncate text-sm font-medium">{a.recordNumber || a.recordId}</p>
                     <Badge variant="warning">Pendente</Badge>
                   </div>
                 ))

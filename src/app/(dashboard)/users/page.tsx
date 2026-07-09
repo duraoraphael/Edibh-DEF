@@ -6,6 +6,8 @@ import { toast } from "sonner";
 import { Search } from "lucide-react";
 import { usersCol } from "@/lib/firestore-helpers";
 import { db } from "@/lib/firebase";
+import { useAuth } from "@/lib/auth-context";
+import { roleLabels } from "@/lib/forms";
 import type { User, UserRole } from "@/types";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
@@ -20,14 +22,9 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 
-const roleLabels: Record<UserRole, string> = {
-  admin: "Administrador",
-  gerente: "Gerente",
-  tecnico: "Técnico de Operações",
-  visualizador: "Visualizador",
-};
-
 export default function UsersPage() {
+  const { profile } = useAuth();
+  const isAdmin = profile?.role === "admin";
   const [users, setUsers] = useState<User[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
@@ -58,6 +55,10 @@ export default function UsersPage() {
   }, [users, search, roleFilter]);
 
   async function changeRole(userId: string, role: UserRole) {
+    if (!isAdmin) {
+      toast.error("Apenas administradores podem alterar cargos");
+      return;
+    }
     const prev = users;
     setUsers((u) => u.map((x) => (x.id === userId ? { ...x, role } : x)));
     try {
@@ -133,18 +134,22 @@ export default function UsersPage() {
                     </div>
                   </TableCell>
                   <TableCell>
-                    <Select value={u.role} onValueChange={(v) => changeRole(u.id, v as UserRole)}>
-                      <SelectTrigger className="w-48">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {Object.entries(roleLabels).map(([k, v]) => (
-                          <SelectItem key={k} value={k}>
-                            {v}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
+                    {isAdmin ? (
+                      <Select value={u.role} onValueChange={(v) => changeRole(u.id, v as UserRole)}>
+                        <SelectTrigger className="w-48">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {Object.entries(roleLabels).map(([k, v]) => (
+                            <SelectItem key={k} value={k}>
+                              {v}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    ) : (
+                      <Badge variant="secondary">{roleLabels[u.role]}</Badge>
+                    )}
                   </TableCell>
                   <TableCell>{u.lastActive ? new Date(u.lastActive).toLocaleString() : "—"}</TableCell>
                   <TableCell>

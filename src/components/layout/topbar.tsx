@@ -4,6 +4,7 @@ import { useRouter } from "next/navigation";
 import Image from "next/image";
 import { Bell, Search, LogOut, UserCircle, Settings } from "lucide-react";
 import { useAuth } from "@/lib/auth-context";
+import { roleLabels } from "@/lib/forms";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import {
   DropdownMenu,
@@ -13,13 +14,6 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-
-const roleLabels: Record<string, string> = {
-  admin: "Administrador",
-  gerente: "Gerente",
-  tecnico: "Técnico de Operações",
-  visualizador: "Visualizador",
-};
 
 export function Topbar() {
   const { profile, signOut } = useAuth();
@@ -86,10 +80,12 @@ export function Topbar() {
               <UserCircle className="h-4 w-4" />
               Meu Perfil
             </DropdownMenuItem>
-            <DropdownMenuItem onClick={() => router.push("/sharepoint")}>
-              <Settings className="h-4 w-4" />
-              Configurações
-            </DropdownMenuItem>
+            {profile?.role === "admin" && (
+              <DropdownMenuItem onClick={() => router.push("/sharepoint")}>
+                <Settings className="h-4 w-4" />
+                Configurações
+              </DropdownMenuItem>
+            )}
             <DropdownMenuSeparator />
             <DropdownMenuItem onClick={() => signOut()}>
               <LogOut className="h-4 w-4" />

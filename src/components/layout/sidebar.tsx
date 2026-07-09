@@ -16,29 +16,36 @@ import {
   LogOut,
   ChevronsLeft,
   ChevronsRight,
-  Leaf,
   Menu,
+  Mail,
   X,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/lib/auth-context";
+import { isRouteAllowed } from "@/lib/forms";
 
 const navItems = [
-  { label: "Dashboard", href: "/dashboard", icon: LayoutDashboard },
-  { label: "Novo Registro", href: "/records/new", icon: FilePlus2 },
-  { label: "Histórico", href: "/records", icon: History },
-  { label: "Aprovações", href: "/approvals", icon: ClipboardCheck },
-  { label: "Usuários", href: "/users", icon: Users },
-  { label: "Formulários", href: "/forms", icon: ListChecks },
-  { label: "Meu Perfil", href: "/profile", icon: UserCircle },
-  { label: "SharePoint", href: "/sharepoint", icon: Share2 },
-];
+  { label: "Dashboard", href: "/dashboard", icon: LayoutDashboard, roles: null },
+  { label: "Novo Registro", href: "/records/new", icon: FilePlus2, roles: null },
+  { label: "Histórico", href: "/records", icon: History, roles: null },
+  { label: "Aprovações", href: "/approvals", icon: ClipboardCheck, roles: ["admin", "gerente"] },
+  { label: "Enviar por E-mail", href: "/email", icon: Mail, roles: null },
+  { label: "Usuários", href: "/users", icon: Users, roles: ["admin"] },
+  { label: "Formulários", href: "/forms", icon: ListChecks, roles: ["admin"] },
+  { label: "Meu Perfil", href: "/profile", icon: UserCircle, roles: null },
+  { label: "SharePoint", href: "/sharepoint", icon: Share2, roles: ["admin"] },
+] as const;
 
 export function Sidebar() {
   const [collapsed, setCollapsed] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
   const pathname = usePathname();
-  const { signOut } = useAuth();
+  const { signOut, profile } = useAuth();
+  const visibleNavItems = navItems.filter(
+    (item) =>
+      (!item.roles || (profile && (item.roles as readonly string[]).includes(profile.role))) &&
+      isRouteAllowed(profile?.role, item.href)
+  );
 
   const content = (
     <div className="flex h-full flex-col">
@@ -65,7 +72,7 @@ export function Sidebar() {
       </div>
 
       <nav className="flex flex-1 flex-col gap-1 px-3 py-2">
-        {navItems.map((item) => {
+        {visibleNavItems.map((item) => {
           const active = pathname === item.href || pathname?.startsWith(item.href + "/");
           const Icon = item.icon;
           return (
