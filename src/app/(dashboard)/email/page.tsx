@@ -10,7 +10,7 @@ import { emailLogsCol, recordsCol, usersCol } from "@/lib/firestore-helpers";
 import { useAuth } from "@/lib/auth-context";
 import { DEFAULT_FORM_ID, logFirestoreError } from "@/lib/forms";
 import type { AppRecord, FormDefinition, RecordStatus, User } from "@/types";
-import { renderEmailReportHtml } from "@/components/email/email-report-template";
+import { renderEmailReportHtml, buildEmailSubject } from "@/components/email/email-report-template";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -115,7 +115,6 @@ export default function EmailPage() {
     return renderEmailReportHtml({
       record: selected,
       fields: sortedFields,
-      senderName: profile?.name,
       images,
     });
   }, [selected, sortedFields, profile?.name, images]);
@@ -144,13 +143,7 @@ export default function EmailPage() {
     const r = records.find((x) => x.id === id);
     if (r) {
       const fields = (activeForm?.fields || []).slice().sort((a, b) => a.order - b.order);
-      const keyField = fields.find((f) => f.type === "texto" && r.data?.[f.key]);
-      const subjectParts = [
-        `Registro ${r.recordNumber || r.id}`,
-        keyField ? String(r.data?.[keyField.key]) : null,
-        statusLabels[r.status],
-      ].filter(Boolean);
-      setSubject(subjectParts.join(" - "));
+      setSubject(buildEmailSubject(r, fields));
     }
   }
 

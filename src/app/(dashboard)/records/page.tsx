@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import { addDoc, deleteDoc, doc, onSnapshot, orderBy, query, setDoc, where } from "firebase/firestore";
+import { addDoc, deleteDoc, doc, onSnapshot, orderBy, query, setDoc, where, writeBatch } from "firebase/firestore";
 import { toast } from "sonner";
 import {
   ArrowDown,
@@ -12,6 +12,7 @@ import {
   Download,
   Eye,
   FileSpreadsheet,
+  ListOrdered,
   MoreVertical,
   Pencil,
   Search,
@@ -69,7 +70,15 @@ const statusVariant: Record<RecordStatus, "default" | "warning" | "success" | "d
   reajuste: "warning",
 };
 
-type SortKey = "recordNumber" | "authorName" | "status" | "createdAt";
+type SortKey =
+  | "recordNumber"
+  | "authorName"
+  | "status"
+  | "createdAt"
+  | "instalacao"
+  | "sistema"
+  | "equipamento"
+  | "gerencia";
 
 const PAGE_SIZE = 8;
 const ALL = "todos";
@@ -100,6 +109,11 @@ export default function RecordsHistoryPage() {
   const [page, setPage] = useState(1);
   const [selected, setSelected] = useState<AppRecord | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<AppRecord | null>(null);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [bulkDeleteOpen, setBulkDeleteOpen] = useState(false);
+  const [bulkDeleting, setBulkDeleting] = useState(false);
+  const [renumberOpen, setRenumberOpen] = useState(false);
+  const [renumbering, setRenumbering] = useState(false);
   const [formFields, setFormFields] = useState<FormField[]>([]);
   const [logs, setLogs] = useState<LogEntry[]>([]);
   const [logsLoadedForId, setLogsLoadedForId] = useState<string | null>(null);
@@ -185,10 +199,11 @@ export default function RecordsHistoryPage() {
     if (dateFrom) list = list.filter((r) => r.createdAt && r.createdAt >= dateFrom);
     if (dateTo) list = list.filter((r) => r.createdAt && r.createdAt <= dateTo + "T23:59:59");
 
+    const fieldKeys: SortKey[] = ["instalacao", "sistema", "equipamento", "gerencia"];
+    const sortValue = (r: AppRecord): string =>
+      fieldKeys.includes(sortKey) ? fieldValue(r, sortKey) : ((r as unknown as Record<string, string>)[sortKey] || "");
     list = [...list].sort((a, b) => {
-      const va = (a[sortKey] || "") as string;
-      const vb = (b[sortKey] || "") as string;
-      const cmp = va.localeCompare(vb);
+      const cmp = sortValue(a).localeCompare(sortValue(b));
       return sortDir === "asc" ? cmp : -cmp;
     });
     return list;
@@ -300,6 +315,102 @@ export default function RecordsHistoryPage() {
     }
   }
 
+  async function deleteSelected() {
+    setBulkDeleting(true);
+    const ids = Array.from(selectedIds);
+    let ok = 0;
+    for (const id of ids) {
+      const r = records.find((rec) => rec.id === id);
+      try {
+        await addDoc(logsCol(), {
+          id: "",
+          recordId: id,
+          action: "Excluído",
+          actorId: user?.uid,
+          actorName: profile?.name || user?.email || undefined,
+          detail: r?.recordNumber,
+          createdAt: new Date().toISOString(),
+        });
+        await deleteDoc(doc(db, "records", id));
+        ok += 1;
+      } catch {
+        // continue deleting the rest even if one record fails
+      }
+    }
+    toast.success(`${ok} registro(s) excluído(s)`);
+    setSelectedIds(new Set());
+    setBulkDeleteOpen(false);
+    setBulkDeleting(false);
+  }
+
+  function toggleSelected(id: string) {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+
+  async function renumberAll() {
+    setRenumbering(true);
+    try {
+      const ordered = [...submitted].sort((a, b) => (a.createdAt || "").localeCompare(b.createdAt || ""));
+      const countersByYear = new Map<number, number>();
+      let batch = writeBatch(db);
+      let opsInBatch = 0;
+      for (const r of ordered) {
+        const year = r.createdAt ? new Date(r.createdAt).getFullYear() : new Date().getFullYear();
+        const next = (countersByYear.get(year) || 0) + 1;
+        countersByYear.set(year, next);
+        const recordNumber = `${next}/${year}`;
+        if (r.recordNumber !== recordNumber) {
+          batch.update(doc(db, "records", r.id), { recordNumber, updatedAt: new Date().toISOString() });
+          opsInBatch += 1;
+        }
+        if (opsInBatch >= 400) {
+          await batch.commit();
+          batch = writeBatch(db);
+          opsInBatch = 0;
+        }
+      }
+      if (opsInBatch > 0) await batch.commit();
+
+      for (const [year, count] of countersByYear.entries()) {
+        await setDoc(doc(db, "settings", `counter_${year}`), { value: count, year }, { merge: true });
+      }
+
+      await addDoc(logsCol(), {
+        id: "",
+        recordId: "",
+        action: "Renumeração geral de IDs",
+        actorId: user?.uid,
+        actorName: profile?.name || user?.email || undefined,
+        createdAt: new Date().toISOString(),
+      });
+
+      toast.success("IDs renumerados em ordem");
+      setRenumberOpen(false);
+    } catch {
+      toast.error("Erro ao renumerar os IDs");
+    } finally {
+      setRenumbering(false);
+    }
+  }
+
+  function toggleSelectAllOnPage() {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      const allSelected = pageItems.every((r) => next.has(r.id));
+      if (allSelected) {
+        pageItems.forEach((r) => next.delete(r.id));
+      } else {
+        pageItems.forEach((r) => next.add(r.id));
+      }
+      return next;
+    });
+  }
+
   function canEdit(r: AppRecord) {
     if (!profile) return false;
     if (profile.role === "admin" || profile.role === "gerente") return true;
@@ -334,6 +445,18 @@ export default function RecordsHistoryPage() {
           <p className="text-sm text-muted-foreground">Consulte todos os registros submetidos</p>
         </div>
         <div className="flex gap-2">
+          {canDelete() && selectedIds.size > 0 && (
+            <Button variant="destructive" onClick={() => setBulkDeleteOpen(true)}>
+              <Trash2 className="h-4 w-4" />
+              Excluir selecionados ({selectedIds.size})
+            </Button>
+          )}
+          {canDelete() && (
+            <Button variant="outline" onClick={() => setRenumberOpen(true)}>
+              <ListOrdered className="h-4 w-4" />
+              Renumerar IDs
+            </Button>
+          )}
           <Button variant="outline" onClick={() => setImportOpen(true)}>
             <Upload className="h-4 w-4" />
             Importar Excel
@@ -425,15 +548,40 @@ export default function RecordsHistoryPage() {
           <Table>
             <TableHeader>
               <TableRow>
+                {canDelete() && (
+                  <TableHead className="w-8">
+                    <input
+                      type="checkbox"
+                      checked={pageItems.length > 0 && pageItems.every((r) => selectedIds.has(r.id))}
+                      onChange={toggleSelectAllOnPage}
+                    />
+                  </TableHead>
+                )}
                 <TableHead>
                   <button className="flex items-center gap-1" onClick={() => toggleSort("recordNumber")}>
                     ID {renderSortIcon("recordNumber")}
                   </button>
                 </TableHead>
-                <TableHead>Instalação</TableHead>
-                <TableHead>Sistema</TableHead>
-                <TableHead>Equipamento</TableHead>
-                <TableHead>Gerência</TableHead>
+                <TableHead>
+                  <button className="flex items-center gap-1" onClick={() => toggleSort("instalacao")}>
+                    Instalação {renderSortIcon("instalacao")}
+                  </button>
+                </TableHead>
+                <TableHead>
+                  <button className="flex items-center gap-1" onClick={() => toggleSort("sistema")}>
+                    Sistema {renderSortIcon("sistema")}
+                  </button>
+                </TableHead>
+                <TableHead>
+                  <button className="flex items-center gap-1" onClick={() => toggleSort("equipamento")}>
+                    Equipamento {renderSortIcon("equipamento")}
+                  </button>
+                </TableHead>
+                <TableHead>
+                  <button className="flex items-center gap-1" onClick={() => toggleSort("gerencia")}>
+                    Gerência {renderSortIcon("gerencia")}
+                  </button>
+                </TableHead>
                 <TableHead>
                   <button className="flex items-center gap-1" onClick={() => toggleSort("createdAt")}>
                     Data {renderSortIcon("createdAt")}
@@ -455,6 +603,15 @@ export default function RecordsHistoryPage() {
             <TableBody>
               {pageItems.map((r) => (
                 <TableRow key={r.id} className="cursor-pointer" onClick={() => setSelected(r)}>
+                  {canDelete() && (
+                    <TableCell onClick={(e) => e.stopPropagation()}>
+                      <input
+                        type="checkbox"
+                        checked={selectedIds.has(r.id)}
+                        onChange={() => toggleSelected(r.id)}
+                      />
+                    </TableCell>
+                  )}
                   <TableCell className="font-medium">{r.recordNumber || "—"}</TableCell>
                   <TableCell>{fieldValue(r, "instalacao") || "—"}</TableCell>
                   <TableCell>{fieldValue(r, "sistema") || "—"}</TableCell>
@@ -631,6 +788,45 @@ export default function RecordsHistoryPage() {
             </Button>
             <Button variant="destructive" onClick={() => deleteTarget && deleteRecord(deleteTarget)}>
               Excluir
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={bulkDeleteOpen} onOpenChange={(o) => !bulkDeleting && setBulkDeleteOpen(o)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Excluir registros selecionados</DialogTitle>
+          </DialogHeader>
+          <p className="text-sm text-muted-foreground">
+            Tem certeza que deseja excluir {selectedIds.size} registro(s)? Esta ação não pode ser desfeita.
+          </p>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setBulkDeleteOpen(false)} disabled={bulkDeleting}>
+              Cancelar
+            </Button>
+            <Button variant="destructive" onClick={deleteSelected} disabled={bulkDeleting}>
+              {bulkDeleting ? "Excluindo..." : "Excluir"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={renumberOpen} onOpenChange={(o) => !renumbering && setRenumberOpen(o)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Renumerar IDs</DialogTitle>
+          </DialogHeader>
+          <p className="text-sm text-muted-foreground">
+            Isso vai reordenar todos os {submitted.length} registro(s) submetidos por data de criação e renumerar
+            sequencialmente (1/ano, 2/ano...), sem pular ou repetir números. Esta ação não pode ser desfeita.
+          </p>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setRenumberOpen(false)} disabled={renumbering}>
+              Cancelar
+            </Button>
+            <Button onClick={renumberAll} disabled={renumbering}>
+              {renumbering ? "Renumerando..." : "Renumerar"}
             </Button>
           </DialogFooter>
         </DialogContent>

@@ -34,6 +34,7 @@ export interface AppRecord {
   data?: Record<string, unknown>;
   createdAt?: string;
   updatedAt?: string;
+  importBatchId?: string;
 }
 
 export type ApprovalAction = "aprovado" | "rejeitado" | "reajuste";
@@ -78,6 +79,13 @@ export interface FormField {
   order: number;
   dependsOnFieldId?: string;
   optionsByParentValue?: Record<string, string[]>;
+}
+
+export interface FormUpdateEntry {
+  id: string;
+  text: string;
+  authorName: string;
+  createdAt?: string;
 }
 
 export interface FormDefinition {

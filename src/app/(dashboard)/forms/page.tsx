@@ -1,7 +1,17 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { doc, onSnapshot, setDoc } from "firebase/firestore";
+import {
+  addDoc,
+  collection,
+  doc,
+  onSnapshot,
+  orderBy,
+  query,
+  serverTimestamp,
+  setDoc,
+  Timestamp,
+} from "firebase/firestore";
 import { toast } from "sonner";
 import {
   Calendar,
@@ -11,6 +21,7 @@ import {
   FileSpreadsheet,
   GripVertical,
   Hash,
+  History,
   ListChecks,
   Mail,
   Paperclip,
@@ -20,6 +31,7 @@ import {
   Type,
 } from "lucide-react";
 import { db } from "@/lib/firebase";
+import { useAuth } from "@/lib/auth-context";
 import {
   DEFAULT_FORM_ID,
   DEFAULT_FORM_SEED_FIELDS,
@@ -30,6 +42,13 @@ import {
   slugifyKey,
 } from "@/lib/forms";
 import type { FormDefinition, FormField, FormFieldType } from "@/types";
+
+interface UpdateEntry {
+  id: string;
+  text: string;
+  authorName: string;
+  createdAt: Timestamp | null;
+}
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -69,6 +88,7 @@ const fieldTypeIcons: Record<FormFieldType, typeof Type> = {
 };
 
 export default function FormsManagerPage() {
+  const { profile } = useAuth();
   const [form, setForm] = useState<FormDefinition | null>(null);
   const [loading, setLoading] = useState(true);
   const [dragIndex, setDragIndex] = useState<number | null>(null);
@@ -78,6 +98,50 @@ export default function FormsManagerPage() {
   const [newType, setNewType] = useState<FormFieldType>("texto");
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const seeded = useRef(false);
+  const [updates, setUpdates] = useState<UpdateEntry[]>([]);
+  const [newUpdateText, setNewUpdateText] = useState("");
+  const [savingUpdate, setSavingUpdate] = useState(false);
+
+  useEffect(() => {
+    const unsub = onSnapshot(
+      query(collection(db, "formFields", DEFAULT_FORM_ID, "updates"), orderBy("createdAt", "desc")),
+      (snap) => {
+        setUpdates(
+          snap.docs.map((d) => ({
+            id: d.id,
+            text: d.data().text as string,
+            authorName: d.data().authorName as string,
+            createdAt: (d.data().createdAt as Timestamp) || null,
+          }))
+        );
+      },
+      (error) => logFirestoreError({ fn: "FormsManagerPage:updates" }, error)
+    );
+    return () => unsub();
+  }, []);
+
+  async function addUpdate() {
+    const text = newUpdateText.trim();
+    if (!text) {
+      toast.error("Digite o texto da atualização");
+      return;
+    }
+    setSavingUpdate(true);
+    try {
+      await addDoc(collection(db, "formFields", DEFAULT_FORM_ID, "updates"), {
+        text,
+        authorName: profile?.name || "Usuário",
+        createdAt: serverTimestamp(),
+      });
+      setNewUpdateText("");
+      toast.success("Atualização adicionada");
+    } catch (error) {
+      logFirestoreError({ fn: "FormsManagerPage:addUpdate" }, error);
+      toast.error("Erro ao salvar atualização. Texto preservado.");
+    } finally {
+      setSavingUpdate(false);
+    }
+  }
 
   useEffect(() => {
     const unsub = onSnapshot(
@@ -394,6 +458,48 @@ export default function FormsManagerPage() {
           </CardContent>
         </Card>
       </div>
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2 text-sm">
+            <History className="h-4 w-4" />
+            Histórico de Atualizações
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="flex flex-col gap-4">
+          <div className="flex flex-col gap-2 sm:flex-row">
+            <Textarea
+              placeholder="Descreva a atualização..."
+              value={newUpdateText}
+              onChange={(e) => setNewUpdateText(e.target.value)}
+              rows={2}
+              className="flex-1"
+            />
+            <Button onClick={addUpdate} disabled={savingUpdate} className="sm:self-end">
+              Adicionar
+            </Button>
+          </div>
+          <div className="flex flex-col gap-3">
+            {updates.length === 0 ? (
+              <p className="text-sm text-muted-foreground">Nenhuma atualização registrada ainda</p>
+            ) : (
+              updates.map((u) => (
+                <div key={u.id} className="flex flex-col gap-1 border-b border-border pb-3 last:border-0 last:pb-0">
+                  <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                    <span className="font-medium text-foreground">{u.authorName}</span>
+                    <span>
+                      {u.createdAt
+                        ? u.createdAt.toDate().toLocaleString("pt-BR")
+                        : "salvando..."}
+                    </span>
+                  </div>
+                  <p className="text-sm">{u.text}</p>
+                </div>
+              ))
+            )}
+          </div>
+        </CardContent>
+      </Card>
 
       <Dialog open={addOpen} onOpenChange={setAddOpen}>
         <DialogContent>

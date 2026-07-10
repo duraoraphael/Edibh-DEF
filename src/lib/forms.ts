@@ -132,6 +132,9 @@ export async function getNextRecordNumber(): Promise<string> {
     return `${String(seq).padStart(2, "0")}/${year}`;
   } catch (error) {
     logFirestoreError({ fn: "getNextRecordNumber", payload: { counterPath: `settings/counter_${year}` } }, error);
-    throw error;
+    // Do not block record persistence if the shared counter is unreachable
+    // (e.g. permission issue on the "settings" collection). Fall back to a
+    // timestamp-based number so the record is still saved.
+    return `${Date.now()}/${year}`;
   }
 }

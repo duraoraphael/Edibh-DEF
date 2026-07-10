@@ -164,7 +164,7 @@ export default function NewRecordPage() {
       const payload = sanitizeForFirestore({
         status: "rascunho" as const,
         authorId: user.uid,
-        authorName: profile?.name || user.email || null,
+        authorName: profile?.name || "Usuário",
         attachments: atts,
         formId: activeForm?.id || null,
         data: nextValues,
@@ -291,25 +291,22 @@ export default function NewRecordPage() {
 
   async function handleSubmit() {
     if (!validateForm()) return;
-    if (!user) return;
+    if (!user) {
+      toast.error("Sessão expirada. Faça login novamente para enviar o registro.");
+      return;
+    }
     setSubmitting(true);
     let recordNumber = existingRecordNumber;
     try {
       if (!recordNumber) {
-        try {
-          recordNumber = await getNextRecordNumber();
-        } catch (error) {
-          logFirestoreError({ fn: "handleSubmit:getNextRecordNumber" }, error);
-          toast.error("Falha ao gerar o número do registro. Verifique as permissões do Firestore em settings/counter_*.");
-          return;
-        }
+        recordNumber = await getNextRecordNumber();
       }
 
       const recordPayload = sanitizeForFirestore({
         recordNumber,
         status: "pendente" as const,
         authorId: user.uid,
-        authorName: profile?.name || user.email || null,
+        authorName: profile?.name || "Usuário",
         attachments,
         formId: activeForm?.id || null,
         data: values,
@@ -339,14 +336,18 @@ export default function NewRecordPage() {
         return;
       }
 
-      await addDoc(logsCol(), {
-        id: "",
-        recordId: draftId,
-        action: editId ? "Reenviado após reajuste" : "Criado",
-        actorId: user.uid,
-        actorName: profile?.name || user.email || undefined,
-        createdAt: new Date().toISOString(),
-      }).catch(() => {});
+      try {
+        await addDoc(logsCol(), {
+          id: "",
+          recordId: draftId,
+          action: editId ? "Reenviado após reajuste" : "Criado",
+          actorId: user.uid,
+          actorName: profile?.name || "Usuário",
+          createdAt: new Date().toISOString(),
+        });
+      } catch (error) {
+        logFirestoreError({ fn: "handleSubmit:addDoc(logs)" }, error);
+      }
 
       window.localStorage.removeItem(`edibh_draft_${draftId}`);
       window.localStorage.removeItem("edibh_draft_id");

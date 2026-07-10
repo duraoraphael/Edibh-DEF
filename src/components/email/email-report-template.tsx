@@ -1,20 +1,4 @@
-import type { AppRecord, FormField, RecordStatus } from "@/types";
-
-const statusLabels: Record<RecordStatus, string> = {
-  rascunho: "Rascunho",
-  pendente: "Em Revisão",
-  aprovado: "Aprovado",
-  rejeitado: "Recusado",
-  reajuste: "Em Andamento",
-};
-
-const statusColors: Record<RecordStatus, { bg: string; text: string; dot: string }> = {
-  rascunho: { bg: "#f3f4f6", text: "#4b5563", dot: "#9ca3af" },
-  pendente: { bg: "#fef3c7", text: "#92400e", dot: "#d97706" },
-  aprovado: { bg: "#d1fae5", text: "#065f46", dot: "#10b981" },
-  rejeitado: { bg: "#fee2e2", text: "#991b1b", dot: "#dc2626" },
-  reajuste: { bg: "#dbeafe", text: "#1e3a8a", dot: "#2563eb" },
-};
+import type { AppRecord, FormField } from "@/types";
 
 const NAVY = "#0b2540";
 const GREEN = "#0e7a4b";
@@ -43,7 +27,6 @@ export interface EmailImage {
 export interface EmailTemplateData {
   record: AppRecord;
   fields: FormField[];
-  senderName?: string;
   images?: EmailImage[];
   logoLeftUrl?: string;
   logoRightUrl?: string;
@@ -57,18 +40,19 @@ function findFieldValue(record: AppRecord, fields: FormField[], keyGuess: string
   return formatFieldValue(v);
 }
 
-function summaryCard(label: string, value: string): string {
-  return `
-  <td width="33%" valign="top" style="padding:0 6px;">
-    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;">
-      <tr>
-        <td style="padding:12px 14px;">
-          <div style="font-family:Arial,Helvetica,sans-serif;font-size:10px;letter-spacing:0.06em;text-transform:uppercase;color:#64748b;font-weight:bold;">${label}</div>
-          <div style="font-family:Arial,Helvetica,sans-serif;font-size:14px;color:#0f172a;font-weight:bold;margin-top:4px;">${value}</div>
-        </td>
-      </tr>
-    </table>
-  </td>`;
+export function buildEmailSubject(record: AppRecord, fields: FormField[]): string {
+  const instalacao = findFieldValue(record, fields, ["instalacao", "instalação"]);
+  const sistema = findFieldValue(record, fields, ["sistema"]);
+  const equipamento = findFieldValue(record, fields, ["equipamento"]);
+  return [
+    `Fluxo ${record.recordNumber || record.id}`,
+    "FLUXO DE EQUIPAMENTOS CRÍTICOS",
+    instalacao,
+    sistema,
+    equipamento,
+  ]
+    .filter(Boolean)
+    .join(" - ");
 }
 
 function dataCard(label: string, value: string, wide: boolean): string {
@@ -89,7 +73,6 @@ function dataCard(label: string, value: string, wide: boolean): string {
 export function renderEmailReportHtml({
   record,
   fields,
-  senderName,
   images = [],
   logoLeftUrl = "https://fluxocriticos.vercel.app/cim-compartilhado.png",
   logoRightUrl = "https://fluxocriticos.vercel.app/petrobras.png",
@@ -102,31 +85,6 @@ export function renderEmailReportHtml({
     .slice()
     .sort((a, b) => a.order - b.order)
     .filter((f) => f.type === "textarea");
-
-  const status = statusColors[record.status];
-  const dataRegistro =
-    findFieldValue(record, fields, ["data", "data_registro", "date"]) ||
-    (record.createdAt ? new Date(record.createdAt).toLocaleDateString("pt-BR") : "—");
-
-  const summaryHtml = `
-    <tr>
-      ${summaryCard("Data do Registro", escapeHtml(dataRegistro))}
-      ${summaryCard("Responsável", escapeHtml(record.authorName || "—"))}
-      <td width="33%" valign="top" style="padding:0 6px;">
-        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;">
-          <tr>
-            <td style="padding:12px 14px;">
-              <div style="font-family:Arial,Helvetica,sans-serif;font-size:10px;letter-spacing:0.06em;text-transform:uppercase;color:#64748b;font-weight:bold;">Status</div>
-              <div style="margin-top:6px;">
-                <span style="display:inline-block;padding:4px 12px;border-radius:999px;background-color:${status.bg};color:${status.text};font-family:Arial,Helvetica,sans-serif;font-size:12px;font-weight:bold;">
-                  <span style="color:${status.dot};">&#9679;</span>&nbsp;${statusLabels[record.status]}
-                </span>
-              </div>
-            </td>
-          </tr>
-        </table>
-      </td>
-    </tr>`;
 
   const dataCardsRows: string[] = [];
   for (let i = 0; i < generalFields.length; i += 2) {
@@ -221,7 +179,6 @@ export function renderEmailReportHtml({
           </td>
           <td valign="middle" align="center" style="padding:0 12px;">
             <div style="font-family:Georgia,'Times New Roman',serif;color:${NAVY};font-size:21px;font-weight:bold;letter-spacing:0.02em;line-height:1.3;text-align:center;">Fluxo de Equipamentos Críticos</div>
-            <div style="font-family:Arial,Helvetica,sans-serif;color:#64748b;font-size:12px;letter-spacing:0.08em;text-transform:uppercase;margin-top:6px;text-align:center;">Relatório de Registro</div>
           </td>
           <td width="130" valign="middle" align="right">
             <img src="${logoRightUrl}" alt="Petrobras" width="104" height="35" style="display:block;border:0;outline:none;text-decoration:none;width:104px;height:auto;" />
@@ -243,15 +200,7 @@ export function renderEmailReportHtml({
   </tr>
 
   <tr>
-    <td style="padding:12px 18px 0;">
-      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
-        ${summaryHtml}
-      </table>
-    </td>
-  </tr>
-
-  <tr>
-    <td style="padding:22px 24px 0;">
+    <td style="padding:20px 24px 0;">
       <span style="display:inline-block;width:4px;height:14px;background-color:${GREEN};vertical-align:middle;margin-right:8px;border-radius:2px;"></span>
       <span style="font-family:Arial,Helvetica,sans-serif;font-size:14px;font-weight:bold;color:#0f172a;vertical-align:middle;">Dados do Registro</span>
     </td>
@@ -288,8 +237,7 @@ export function renderEmailReportHtml({
           </td>
           <td valign="top">
             <div style="font-family:Arial,Helvetica,sans-serif;font-size:12px;color:#374151;font-weight:bold;">Fluxo de Equipamentos Críticos</div>
-            <div style="font-family:Arial,Helvetica,sans-serif;font-size:11px;color:#6b7280;margin-top:2px;">Responsável: ${escapeHtml(senderName || "—")}</div>
-            <div style="font-family:Arial,Helvetica,sans-serif;font-size:11px;color:#6b7280;">Gerado em ${new Date().toLocaleString("pt-BR")}</div>
+            <div style="font-family:Arial,Helvetica,sans-serif;font-size:11px;color:#6b7280;margin-top:2px;">Gerado em ${new Date().toLocaleString("pt-BR")}</div>
             <div style="font-family:Arial,Helvetica,sans-serif;font-size:10px;color:#9ca3af;margin-top:8px;">Relatório gerado automaticamente pelo sistema.</div>
           </td>
         </tr>
