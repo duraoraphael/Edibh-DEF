@@ -32,7 +32,7 @@ const navItems = [
   { label: "Aprovações", href: "/approvals", icon: ClipboardCheck, roles: ["admin", "gerente"] },
   { label: "Enviar por E-mail", href: "/email", icon: Mail, roles: null },
   { label: "Usuários", href: "/users", icon: Users, roles: ["admin"] },
-  { label: "Formulários", href: "/forms", icon: ListChecks, roles: ["admin"] },
+  { label: "Formulários", href: "/forms", icon: ListChecks, roles: ["admin", "gerente"] },
   { label: "Meu Perfil", href: "/profile", icon: UserCircle, roles: null },
   { label: "SharePoint", href: "/sharepoint", icon: Share2, roles: ["admin"] },
 ] as const;

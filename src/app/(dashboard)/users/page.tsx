@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { doc, onSnapshot, updateDoc } from "firebase/firestore";
+import { doc, onSnapshot, Timestamp, updateDoc } from "firebase/firestore";
 import { toast } from "sonner";
 import { Search } from "lucide-react";
 import { usersCol } from "@/lib/firestore-helpers";
@@ -21,6 +21,18 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+
+function formatLastActive(value: User["lastActive"]): string {
+  if (!value) return "—";
+  const date =
+    value instanceof Timestamp
+      ? value.toDate()
+      : typeof value === "object" && value !== null && "seconds" in value
+        ? new Date((value as { seconds: number }).seconds * 1000)
+        : new Date(value as string);
+  if (Number.isNaN(date.getTime())) return "—";
+  return date.toLocaleString("pt-BR");
+}
 
 export default function UsersPage() {
   const { profile } = useAuth();
@@ -151,7 +163,7 @@ export default function UsersPage() {
                       <Badge variant="secondary">{roleLabels[u.role]}</Badge>
                     )}
                   </TableCell>
-                  <TableCell>{u.lastActive ? new Date(u.lastActive).toLocaleString() : "—"}</TableCell>
+                  <TableCell>{formatLastActive(u.lastActive)}</TableCell>
                   <TableCell>
                     <Badge variant={u.status === "inativo" ? "secondary" : "success"}>
                       {u.status === "inativo" ? "Inativo" : "Ativo"}

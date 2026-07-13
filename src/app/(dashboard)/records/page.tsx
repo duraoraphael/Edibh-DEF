@@ -2,7 +2,20 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import { addDoc, deleteDoc, doc, onSnapshot, orderBy, query, setDoc, where, writeBatch } from "firebase/firestore";
+import {
+  addDoc,
+  collection,
+  deleteDoc,
+  doc,
+  onSnapshot,
+  orderBy,
+  query,
+  serverTimestamp,
+  setDoc,
+  Timestamp,
+  where,
+  writeBatch,
+} from "firebase/firestore";
 import { toast } from "sonner";
 import {
   ArrowDown,
@@ -19,14 +32,14 @@ import {
   Trash2,
   Upload,
 } from "lucide-react";
-import * as XLSX from "xlsx";
+import { exportRecordsToExcel } from "@/lib/excel-export";
 import { db } from "@/lib/firebase";
 import { logsCol, recordsCol } from "@/lib/firestore-helpers";
 import { useAuth } from "@/lib/auth-context";
-import { DEFAULT_FORM_ID } from "@/lib/forms";
+import { DEFAULT_FORM_ID, fieldValue, statusLabels, statusVariant } from "@/lib/forms";
 import { ExcelImportDialog } from "@/components/records/excel-import-dialog";
 import { generateRecordPdf, generateRecordsTablePdf } from "@/lib/pdf";
-import type { AppRecord, FormDefinition, FormField, LogEntry, RecordStatus } from "@/types";
+import type { AppRecord, FormDefinition, FormField, LogEntry } from "@/types";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -54,22 +67,6 @@ import {
 } from "@/components/ui/dialog";
 import { cn } from "@/lib/utils";
 
-const statusLabels: Record<RecordStatus, string> = {
-  rascunho: "Rascunho",
-  pendente: "Em análise",
-  aprovado: "Aprovado",
-  rejeitado: "Reprovado",
-  reajuste: "Aguardando Reajuste",
-};
-
-const statusVariant: Record<RecordStatus, "default" | "warning" | "success" | "destructive" | "secondary"> = {
-  rascunho: "secondary",
-  pendente: "warning",
-  aprovado: "success",
-  rejeitado: "destructive",
-  reajuste: "warning",
-};
-
 type SortKey =
   | "recordNumber"
   | "authorName"
@@ -83,11 +80,11 @@ type SortKey =
 const PAGE_SIZE = 8;
 const ALL = "todos";
 
-function fieldValue(r: AppRecord, key: string): string {
-  const v = r.data?.[key];
-  if (v === undefined || v === null || v === "") return "";
-  if (Array.isArray(v)) return v.join(", ");
-  return String(v);
+interface FlowUpdateEntry {
+  id: string;
+  text: string;
+  authorName: string;
+  createdAt: Timestamp | null;
 }
 
 export default function RecordsHistoryPage() {
@@ -118,6 +115,10 @@ export default function RecordsHistoryPage() {
   const [logs, setLogs] = useState<LogEntry[]>([]);
   const [logsLoadedForId, setLogsLoadedForId] = useState<string | null>(null);
   const [importOpen, setImportOpen] = useState(false);
+  const [flowUpdates, setFlowUpdates] = useState<FlowUpdateEntry[]>([]);
+  const [newFlowUpdateText, setNewFlowUpdateText] = useState("");
+  const [savingFlowUpdate, setSavingFlowUpdate] = useState(false);
+  const isAdmin = profile?.role === "admin";
 
   useEffect(() => {
     const unsub = onSnapshot(doc(db, "formFields", DEFAULT_FORM_ID), (snap) => {
@@ -155,6 +156,56 @@ export default function RecordsHistoryPage() {
   }, [selected]);
 
   const logsLoading = !!selected && logsLoadedForId !== selected.id;
+
+  useEffect(() => {
+    if (!selected) return;
+    const unsub = onSnapshot(
+      query(collection(db, "records", selected.id, "updates"), orderBy("createdAt", "desc")),
+      (snap) => {
+        setFlowUpdates(
+          snap.docs.map((d) => ({
+            id: d.id,
+            text: d.data().text as string,
+            authorName: d.data().authorName as string,
+            createdAt: (d.data().createdAt as Timestamp) || null,
+          }))
+        );
+      }
+    );
+    return () => unsub();
+  }, [selected]);
+
+  async function addFlowUpdate() {
+    if (!selected || !isAdmin) return;
+    const text = newFlowUpdateText.trim();
+    if (!text) {
+      toast.error("Digite o texto da atualização");
+      return;
+    }
+    setSavingFlowUpdate(true);
+    try {
+      await addDoc(collection(db, "records", selected.id, "updates"), {
+        text,
+        authorName: profile?.name || user?.email || "Usuário",
+        createdAt: serverTimestamp(),
+      });
+      await addDoc(logsCol(), {
+        id: "",
+        recordId: selected.id,
+        action: "Atualização do fluxo adicionada",
+        actorId: user?.uid,
+        actorName: profile?.name || user?.email || undefined,
+        detail: text,
+        createdAt: new Date().toISOString(),
+      });
+      setNewFlowUpdateText("");
+      toast.success("Atualização adicionada");
+    } catch {
+      toast.error("Erro ao salvar atualização");
+    } finally {
+      setSavingFlowUpdate(false);
+    }
+  }
 
   const submitted = useMemo(() => records.filter((r) => r.status !== "rascunho"), [records]);
 
@@ -247,11 +298,13 @@ export default function RecordsHistoryPage() {
     };
   }
 
-  function exportExcel() {
-    const sheet = XLSX.utils.json_to_sheet(filtered.map(rowData));
-    const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, sheet, "Registros");
-    XLSX.writeFile(wb, "registros_equipamentos.xlsx");
+  async function exportExcel() {
+    try {
+      await exportRecordsToExcel({ records: filtered, userName: profile?.name || user?.email || "—" });
+    } catch (error) {
+      console.error("[RecordsHistoryPage:exportExcel] falha ao gerar Excel", error);
+      toast.error("Erro ao gerar o Excel. Veja o console para detalhes.");
+    }
   }
 
   async function exportPdf() {
@@ -738,6 +791,38 @@ export default function RecordsHistoryPage() {
                             </a>
                           );
                         })}
+                      </div>
+                    )}
+                  </div>
+                  <div>
+                    <h3 className="mb-2 text-sm font-semibold">Atualizações do Fluxo</h3>
+                    {isAdmin && (
+                      <div className="mb-3 flex flex-col gap-2 sm:flex-row">
+                        <textarea
+                          className="flex-1 rounded-lg border border-border bg-background p-2 text-sm"
+                          placeholder="Registre observações, andamento ou ações realizadas..."
+                          value={newFlowUpdateText}
+                          onChange={(e) => setNewFlowUpdateText(e.target.value)}
+                          rows={2}
+                        />
+                        <Button size="sm" onClick={addFlowUpdate} disabled={savingFlowUpdate} className="sm:self-end">
+                          Adicionar
+                        </Button>
+                      </div>
+                    )}
+                    {flowUpdates.length === 0 ? (
+                      <p className="text-sm text-muted-foreground">Nenhuma atualização registrada</p>
+                    ) : (
+                      <div className="flex flex-col gap-3">
+                        {flowUpdates.map((u) => (
+                          <div key={u.id} className="rounded-lg border border-border p-3">
+                            <div className="mb-1 flex items-center gap-2 text-xs text-muted-foreground">
+                              <span className="font-medium text-foreground">{u.authorName}</span>
+                              <span>{u.createdAt ? u.createdAt.toDate().toLocaleString("pt-BR") : "salvando..."}</span>
+                            </div>
+                            <p className="whitespace-pre-wrap text-sm">{u.text}</p>
+                          </div>
+                        ))}
                       </div>
                     )}
                   </div>

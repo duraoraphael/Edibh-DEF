@@ -1,0 +1,25 @@
+rules_version = '2';
+
+service firebase.storage {
+  match /b/{bucket}/o {
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isValidUpload() {
+      return request.resource.size < 20 * 1024 * 1024
+        && request.resource.contentType.matches('image/.*|application/pdf|application/vnd.openxmlformats-officedocument.*|application/msword|application/vnd.ms-excel');
+    }
+
+    match /records/{recordId}/{allPaths=**} {
+      allow read: if isSignedIn();
+      allow write: if isSignedIn() && isValidUpload();
+    }
+
+    match /{allPaths=**} {
+      allow read: if isSignedIn();
+      allow write: if isSignedIn() && isValidUpload();
+    }
+  }
+}

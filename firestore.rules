@@ -1,0 +1,104 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function userDoc() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid));
+    }
+
+    function role() {
+      return isSignedIn() ? userDoc().data.role : null;
+    }
+
+    function isAdmin() {
+      return role() == 'admin';
+    }
+
+    function isGerente() {
+      return role() == 'gerente';
+    }
+
+    function isTecnico() {
+      return role() == 'tecnico';
+    }
+
+    function isAdminOrGerente() {
+      return isAdmin() || isGerente();
+    }
+
+    function isOwner(authorId) {
+      return isSignedIn() && request.auth.uid == authorId;
+    }
+
+    // users: everyone signed in can read (for author names, avatars); only
+    // admin may change roles, self may update own non-role profile fields.
+    match /users/{userId} {
+      allow read: if isSignedIn();
+      allow create: if isSignedIn() && request.auth.uid == userId;
+      allow update: if isAdmin()
+        || (isSignedIn() && request.auth.uid == userId
+            && request.resource.data.role == resource.data.role);
+      allow delete: if isAdmin();
+    }
+
+    // records: admin/gerente full access; tecnico may create and may only
+    // edit/delete records they authored; visualizador is read-only.
+    match /records/{recordId} {
+      allow read: if isSignedIn();
+      allow create: if isSignedIn() && role() != 'visualizador'
+        && request.resource.data.authorId == request.auth.uid;
+      allow update: if isAdminOrGerente()
+        || (isTecnico() && resource.data.authorId == request.auth.uid);
+      allow delete: if isAdminOrGerente();
+
+      match /updates/{updateId} {
+        allow read: if isSignedIn();
+        allow create: if isAdmin();
+        allow update, delete: if isAdmin();
+      }
+    }
+
+    // approvals: only admin/gerente act on approvals; everyone signed in reads.
+    match /approvals/{approvalId} {
+      allow read: if isSignedIn();
+      allow write: if isAdminOrGerente();
+    }
+
+    // form definitions: admin/gerente manage fields; everyone reads (needed
+    // to render the "new record" form).
+    match /formFields/{formId} {
+      allow read: if isSignedIn();
+      allow write: if isAdminOrGerente();
+
+      match /updates/{updateId} {
+        allow read: if isSignedIn();
+        allow write: if isAdmin();
+      }
+    }
+
+    // audit log: append-only by any signed-in user (actions are always tied
+    // to the authenticated actor); no client may edit or delete history.
+    match /logs/{logId} {
+      allow read: if isAdminOrGerente();
+      allow create: if isSignedIn() && request.resource.data.actorId == request.auth.uid;
+      allow update, delete: if false;
+    }
+
+    match /emailLogs/{logId} {
+      allow read: if isAdminOrGerente();
+      allow create: if isSignedIn() && request.resource.data.senderId == request.auth.uid;
+      allow update, delete: if false;
+    }
+
+    // shared sequence counters used to generate record numbers.
+    match /settings/{settingId} {
+      allow read: if isSignedIn();
+      allow write: if isAdminOrGerente();
+    }
+  }
+}

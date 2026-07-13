@@ -1,6 +1,29 @@
 import { doc, runTransaction } from "firebase/firestore";
 import { db } from "./firebase";
-import type { FormField, FormFieldType, UserRole } from "@/types";
+import type { AppRecord, FormField, FormFieldType, RecordStatus, UserRole } from "@/types";
+
+export const statusLabels: Record<RecordStatus, string> = {
+  rascunho: "Rascunho",
+  pendente: "Em análise",
+  aprovado: "Aprovado",
+  rejeitado: "Reprovado",
+  reajuste: "Aguardando Reajuste",
+};
+
+export const statusVariant: Record<RecordStatus, "default" | "warning" | "success" | "destructive" | "secondary"> = {
+  rascunho: "secondary",
+  pendente: "warning",
+  aprovado: "success",
+  rejeitado: "destructive",
+  reajuste: "warning",
+};
+
+export function fieldValue(r: AppRecord, key: string): string {
+  const v = r.data?.[key];
+  if (v === undefined || v === null || v === "") return "";
+  if (Array.isArray(v)) return v.join(", ");
+  return String(v);
+}
 
 export const DEFAULT_FORM_ID = "default";
 
@@ -79,8 +102,8 @@ export const roleLabels: Record<UserRole, string> = {
 /** Routes each role may access. `null` = all authenticated users. Used by both sidebar and route-guard. */
 export const allowedRoutesByRole: Record<UserRole, string[] | null> = {
   admin: null,
-  gerente: null,
-  visualizador: null,
+  gerente: ["/dashboard", "/records", "/records/new", "/forms", "/approvals", "/profile", "/email", "/sharepoint"],
+  visualizador: ["/dashboard", "/records", "/profile"],
   tecnico: ["/dashboard", "/records", "/records/new", "/profile"],
 };
 

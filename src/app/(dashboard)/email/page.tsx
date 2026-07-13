@@ -8,8 +8,8 @@ import { Download, Mail, X } from "lucide-react";
 import { db } from "@/lib/firebase";
 import { emailLogsCol, recordsCol, usersCol } from "@/lib/firestore-helpers";
 import { useAuth } from "@/lib/auth-context";
-import { DEFAULT_FORM_ID, logFirestoreError } from "@/lib/forms";
-import type { AppRecord, FormDefinition, RecordStatus, User } from "@/types";
+import { DEFAULT_FORM_ID, logFirestoreError, statusLabels } from "@/lib/forms";
+import type { AppRecord, FormDefinition, User } from "@/types";
 import { renderEmailReportHtml, buildEmailSubject } from "@/components/email/email-report-template";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -24,13 +24,14 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 
-const statusLabels: Record<RecordStatus, string> = {
-  rascunho: "Rascunho",
-  pendente: "Em análise",
-  aprovado: "Aprovado",
-  rejeitado: "Reprovado",
-  reajuste: "Aguardando Reajuste",
-};
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+function parseEmails(raw: string): string[] {
+  return raw
+    .split(",")
+    .map((e) => e.trim())
+    .filter(Boolean);
+}
 
 export default function EmailPage() {
   const { user, profile } = useAuth();
@@ -43,6 +44,7 @@ export default function EmailPage() {
   const [to, setTo] = useState("");
   const [ccList, setCcList] = useState<string[]>([]);
   const [ccInput, setCcInput] = useState("");
+  const [ccOpen, setCcOpen] = useState(false);
   const [subject, setSubject] = useState("");
   const [sending, setSending] = useState(false);
   const [downloading, setDownloading] = useState(false);
@@ -117,21 +119,28 @@ export default function EmailPage() {
       fields: sortedFields,
       images,
     });
-  }, [selected, sortedFields, profile?.name, images]);
+  }, [selected, sortedFields, images]);
 
   const userSuggestions = useMemo(() => {
     const q = ccInput.trim().toLowerCase();
     if (!q) return [];
     return allUsers
-      .filter((u) => u.email && !ccList.includes(u.email) && (u.name.toLowerCase().includes(q) || u.email.toLowerCase().includes(q)))
+      .filter(
+        (u) =>
+          u.email &&
+          !ccList.some((e) => e.toLowerCase() === u.email.toLowerCase()) &&
+          (u.name.toLowerCase().includes(q) || u.email.toLowerCase().includes(q))
+      )
       .slice(0, 6);
   }, [ccInput, allUsers, ccList]);
 
   function addCc(email: string) {
     const trimmed = email.trim();
     if (!trimmed) return;
-    if (!ccList.includes(trimmed)) setCcList((prev) => [...prev, trimmed]);
+    const lower = trimmed.toLowerCase();
+    if (!ccList.some((e) => e.toLowerCase() === lower)) setCcList((prev) => [...prev, trimmed]);
     setCcInput("");
+    setCcOpen(false);
   }
 
   function removeCc(email: string) {
@@ -152,8 +161,14 @@ export default function EmailPage() {
       toast.error("Selecione um registro");
       return;
     }
-    if (!to.trim()) {
+    const toEmails = parseEmails(to);
+    if (toEmails.length === 0) {
       toast.error("Informe ao menos um destinatário");
+      return;
+    }
+    const invalid = toEmails.filter((e) => !EMAIL_RE.test(e));
+    if (invalid.length > 0) {
+      toast.error(`E-mail inválido: ${invalid.join(", ")}`);
       return;
     }
     setSending(true);
@@ -338,16 +353,23 @@ export default function EmailPage() {
                 <Input
                   id="cc"
                   value={ccInput}
-                  onChange={(e) => setCcInput(e.target.value)}
+                  onChange={(e) => {
+                    setCcInput(e.target.value);
+                    setCcOpen(true);
+                  }}
                   onKeyDown={(e) => {
                     if (e.key === "Enter" || e.key === ",") {
                       e.preventDefault();
                       addCc(ccInput);
                     }
+                    if (e.key === "Escape") {
+                      setCcOpen(false);
+                    }
                   }}
+                  onBlur={() => setTimeout(() => setCcOpen(false), 150)}
                   placeholder="Digite nome ou e-mail e pressione Enter"
                 />
-                {userSuggestions.length > 0 && (
+                {ccOpen && userSuggestions.length > 0 && (
                   <div className="absolute z-10 mt-1 w-full rounded-md border border-border bg-popover shadow-md">
                     {userSuggestions.map((u) => (
                       <button
@@ -368,7 +390,7 @@ export default function EmailPage() {
                   {ccList.map((email) => (
                     <Badge key={email} variant="secondary" className="gap-1">
                       {email}
-                      <button type="button" onClick={() => removeCc(email)}>
+                      <button type="button" aria-label={`Remover ${email}`} onClick={() => removeCc(email)}>
                         <X className="h-3 w-3" />
                       </button>
                     </Badge>

@@ -89,6 +89,7 @@ const fieldTypeIcons: Record<FormFieldType, typeof Type> = {
 
 export default function FormsManagerPage() {
   const { profile } = useAuth();
+  const isAdmin = profile?.role === "admin";
   const [form, setForm] = useState<FormDefinition | null>(null);
   const [loading, setLoading] = useState(true);
   const [dragIndex, setDragIndex] = useState<number | null>(null);
@@ -467,18 +468,20 @@ export default function FormsManagerPage() {
           </CardTitle>
         </CardHeader>
         <CardContent className="flex flex-col gap-4">
-          <div className="flex flex-col gap-2 sm:flex-row">
-            <Textarea
-              placeholder="Descreva a atualização..."
-              value={newUpdateText}
-              onChange={(e) => setNewUpdateText(e.target.value)}
-              rows={2}
-              className="flex-1"
-            />
-            <Button onClick={addUpdate} disabled={savingUpdate} className="sm:self-end">
-              Adicionar
-            </Button>
-          </div>
+          {isAdmin && (
+            <div className="flex flex-col gap-2 sm:flex-row">
+              <Textarea
+                placeholder="Descreva a atualização..."
+                value={newUpdateText}
+                onChange={(e) => setNewUpdateText(e.target.value)}
+                rows={2}
+                className="flex-1"
+              />
+              <Button onClick={addUpdate} disabled={savingUpdate} className="sm:self-end">
+                Adicionar
+              </Button>
+            </div>
+          )}
           <div className="flex flex-col gap-3">
             {updates.length === 0 ? (
               <p className="text-sm text-muted-foreground">Nenhuma atualização registrada ainda</p>

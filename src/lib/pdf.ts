@@ -1,20 +1,13 @@
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
-import type { AppRecord, AttachmentRef, FormField, RecordStatus } from "@/types";
+import type { AppRecord, AttachmentRef, FormField } from "@/types";
+import { statusLabels } from "./forms";
 
 const GREEN: [number, number, number] = [14, 122, 75];
 const GREEN_DARK: [number, number, number] = [12, 105, 64];
 const GRAY_LIGHT: [number, number, number] = [245, 247, 250];
 const TEXT_DARK: [number, number, number] = [31, 41, 55];
 const TEXT_MUTED: [number, number, number] = [107, 114, 128];
-
-export const statusLabels: Record<RecordStatus, string> = {
-  rascunho: "Rascunho",
-  pendente: "Em análise",
-  aprovado: "Aprovado",
-  rejeitado: "Reprovado",
-  reajuste: "Aguardando Reajuste",
-};
 
 async function urlToDataUrl(url: string): Promise<string | null> {
   try {

@@ -1,5 +1,10 @@
 export type UserRole = "admin" | "gerente" | "tecnico" | "visualizador";
 
+export interface FirestoreTimestampLike {
+  seconds: number;
+  nanoseconds: number;
+}
+
 export interface User {
   id: string;
   name: string;
@@ -8,7 +13,8 @@ export interface User {
   avatarUrl?: string;
   department?: string;
   status?: "ativo" | "inativo";
-  lastActive?: string;
+  lastActive?: string | FirestoreTimestampLike;
+  lastLogin?: string | FirestoreTimestampLike;
   createdAt?: string;
 }
 
@@ -79,13 +85,6 @@ export interface FormField {
   order: number;
   dependsOnFieldId?: string;
   optionsByParentValue?: Record<string, string[]>;
-}
-
-export interface FormUpdateEntry {
-  id: string;
-  text: string;
-  authorName: string;
-  createdAt?: string;
 }
 
 export interface FormDefinition {
