@@ -1,5 +1,6 @@
-import { doc, runTransaction } from "firebase/firestore";
+import { doc, getDocs, query, runTransaction, where } from "firebase/firestore";
 import { db } from "./firebase";
+import { recordsCol } from "./firestore-helpers";
 import type { AppRecord, FormField, FormFieldType, RecordStatus, UserRole } from "@/types";
 
 export const statusLabels: Record<RecordStatus, string> = {
@@ -139,6 +140,11 @@ export function applyMask(value: string, mask: string): string {
     }
   }
   return result;
+}
+
+export async function recordNumberExists(recordNumber: string, excludeId?: string): Promise<boolean> {
+  const snap = await getDocs(query(recordsCol(), where("recordNumber", "==", recordNumber)));
+  return snap.docs.some((d) => d.id !== excludeId);
 }
 
 export async function getNextRecordNumber(): Promise<string> {

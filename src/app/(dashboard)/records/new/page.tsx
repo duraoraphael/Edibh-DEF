@@ -13,6 +13,7 @@ import {
   applyMask,
   getNextRecordNumber,
   logFirestoreError,
+  recordNumberExists,
   sanitizeForFirestore,
 } from "@/lib/forms";
 import { logsCol } from "@/lib/firestore-helpers";
@@ -106,6 +107,8 @@ export default function NewRecordPage() {
     }
   });
   const [existingRecordNumber, setExistingRecordNumber] = useState<string | undefined>();
+  const [manualRecordNumber, setManualRecordNumber] = useState("");
+  const isAdmin = profile?.role === "admin";
   const [uploadProgress, setUploadProgress] = useState<Record<string, number>>({});
   const [dragActive, setDragActive] = useState(false);
   const [savingDraft, setSavingDraft] = useState(false);
@@ -150,6 +153,7 @@ export default function NewRecordPage() {
       setValues(data.data || {});
       setAttachments(data.attachments || []);
       setExistingRecordNumber(data.recordNumber);
+      setManualRecordNumber(data.recordNumber || "");
     });
   }, [editId]);
 
@@ -298,7 +302,15 @@ export default function NewRecordPage() {
     setSubmitting(true);
     let recordNumber = existingRecordNumber;
     try {
-      if (!recordNumber) {
+      const typed = manualRecordNumber.trim();
+      if (isAdmin && typed) {
+        if (typed !== existingRecordNumber && (await recordNumberExists(typed, draftId))) {
+          toast.error(`O número de fluxo "${typed}" já está em uso. Informe outro número.`);
+          setSubmitting(false);
+          return;
+        }
+        recordNumber = typed;
+      } else if (!recordNumber) {
         recordNumber = await getNextRecordNumber();
       }
 
@@ -383,6 +395,20 @@ export default function NewRecordPage() {
 
       <SectionCard number={1} title="Dados Gerais">
         <div className="grid grid-cols-1 gap-5 md:grid-cols-2">
+          {isAdmin && (
+            <div className="flex flex-col gap-1.5">
+              <Label htmlFor="manual-record-number">Número do Fluxo</Label>
+              <Input
+                id="manual-record-number"
+                value={manualRecordNumber}
+                onChange={(e) => setManualRecordNumber(e.target.value)}
+                placeholder="Deixe em branco para gerar automaticamente"
+              />
+              <p className="text-xs text-muted-foreground">
+                Opcional. Se não informado, o próximo número sequencial será gerado automaticamente.
+              </p>
+            </div>
+          )}
           {generalFields.map((field) => (
             <div key={field.id} className="flex flex-col gap-1.5">
               <div className="flex items-center gap-2">

@@ -41,6 +41,9 @@ export interface AppRecord {
   createdAt?: string;
   updatedAt?: string;
   importBatchId?: string;
+  deletedAt?: string;
+  deletedBy?: string;
+  deletedByName?: string;
 }
 
 export type ApprovalAction = "aprovado" | "rejeitado" | "reajuste";

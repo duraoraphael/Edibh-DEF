@@ -13,6 +13,7 @@ import {
   serverTimestamp,
   setDoc,
   Timestamp,
+  updateDoc,
   where,
   writeBatch,
 } from "firebase/firestore";
@@ -28,6 +29,7 @@ import {
   ListOrdered,
   MoreVertical,
   Pencil,
+  RotateCcw,
   Search,
   Trash2,
   Upload,
@@ -106,9 +108,11 @@ export default function RecordsHistoryPage() {
   const [page, setPage] = useState(1);
   const [selected, setSelected] = useState<AppRecord | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<AppRecord | null>(null);
+  const [permanentDeleteTarget, setPermanentDeleteTarget] = useState<AppRecord | null>(null);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [bulkDeleteOpen, setBulkDeleteOpen] = useState(false);
   const [bulkDeleting, setBulkDeleting] = useState(false);
+  const [view, setView] = useState<"ativos" | "removidos">("ativos");
   const [renumberOpen, setRenumberOpen] = useState(false);
   const [renumbering, setRenumbering] = useState(false);
   const [formFields, setFormFields] = useState<FormField[]>([]);
@@ -207,7 +211,16 @@ export default function RecordsHistoryPage() {
     }
   }
 
-  const submitted = useMemo(() => records.filter((r) => r.status !== "rascunho"), [records]);
+  const submitted = useMemo(() => {
+    if (view === "removidos") return records.filter((r) => !!r.deletedAt);
+    return records.filter((r) => r.status !== "rascunho" && !r.deletedAt);
+  }, [records, view]);
+
+  function switchView(v: "ativos" | "removidos") {
+    setView(v);
+    setSelectedIds(new Set());
+    setPage(1);
+  }
 
   const distinct = useCallback(
     (key: string) => Array.from(new Set(submitted.map((r) => fieldValue(r, key)).filter(Boolean))).sort(),
@@ -354,14 +367,18 @@ export default function RecordsHistoryPage() {
       await addDoc(logsCol(), {
         id: "",
         recordId: r.id,
-        action: "Excluído",
+        action: "Excluído (movido para Removidos)",
         actorId: user?.uid,
         actorName: profile?.name || user?.email || undefined,
         detail: r.recordNumber,
         createdAt: new Date().toISOString(),
       });
-      await deleteDoc(doc(db, "records", r.id));
-      toast.success("Registro excluído");
+      await updateDoc(doc(db, "records", r.id), {
+        deletedAt: new Date().toISOString(),
+        deletedBy: user?.uid || null,
+        deletedByName: profile?.name || user?.email || null,
+      });
+      toast.success("Registro movido para Removidos");
       setDeleteTarget(null);
     } catch {
       toast.error("Erro ao excluir registro");
@@ -378,22 +395,67 @@ export default function RecordsHistoryPage() {
         await addDoc(logsCol(), {
           id: "",
           recordId: id,
-          action: "Excluído",
+          action: "Excluído (movido para Removidos)",
           actorId: user?.uid,
           actorName: profile?.name || user?.email || undefined,
           detail: r?.recordNumber,
           createdAt: new Date().toISOString(),
         });
-        await deleteDoc(doc(db, "records", id));
+        await updateDoc(doc(db, "records", id), {
+          deletedAt: new Date().toISOString(),
+          deletedBy: user?.uid || null,
+          deletedByName: profile?.name || user?.email || null,
+        });
         ok += 1;
       } catch {
         // continue deleting the rest even if one record fails
       }
     }
-    toast.success(`${ok} registro(s) excluído(s)`);
+    toast.success(`${ok} registro(s) movido(s) para Removidos`);
     setSelectedIds(new Set());
     setBulkDeleteOpen(false);
     setBulkDeleting(false);
+  }
+
+  async function restoreRecord(r: AppRecord) {
+    try {
+      await addDoc(logsCol(), {
+        id: "",
+        recordId: r.id,
+        action: "Restaurado",
+        actorId: user?.uid,
+        actorName: profile?.name || user?.email || undefined,
+        detail: r.recordNumber,
+        createdAt: new Date().toISOString(),
+      });
+      await updateDoc(doc(db, "records", r.id), {
+        deletedAt: null,
+        deletedBy: null,
+        deletedByName: null,
+      });
+      toast.success("Registro restaurado");
+    } catch {
+      toast.error("Erro ao restaurar registro");
+    }
+  }
+
+  async function permanentDeleteRecord(r: AppRecord) {
+    try {
+      await addDoc(logsCol(), {
+        id: "",
+        recordId: r.id,
+        action: "Excluído permanentemente",
+        actorId: user?.uid,
+        actorName: profile?.name || user?.email || undefined,
+        detail: r.recordNumber,
+        createdAt: new Date().toISOString(),
+      });
+      await deleteDoc(doc(db, "records", r.id));
+      toast.success("Registro excluído permanentemente");
+      setPermanentDeleteTarget(null);
+    } catch {
+      toast.error("Erro ao excluir registro permanentemente");
+    }
   }
 
   function toggleSelected(id: string) {
@@ -474,6 +536,10 @@ export default function RecordsHistoryPage() {
     return profile?.role === "admin" || profile?.role === "gerente";
   }
 
+  function canPermanentDelete() {
+    return profile?.role === "admin";
+  }
+
   function canDuplicate() {
     return profile?.role !== "visualizador";
   }
@@ -498,31 +564,56 @@ export default function RecordsHistoryPage() {
           <p className="text-sm text-muted-foreground">Consulte todos os registros submetidos</p>
         </div>
         <div className="flex gap-2">
-          {canDelete() && selectedIds.size > 0 && (
+          {view === "ativos" && canDelete() && selectedIds.size > 0 && (
             <Button variant="destructive" onClick={() => setBulkDeleteOpen(true)}>
               <Trash2 className="h-4 w-4" />
               Excluir selecionados ({selectedIds.size})
             </Button>
           )}
-          {canDelete() && (
+          {view === "ativos" && canDelete() && (
             <Button variant="outline" onClick={() => setRenumberOpen(true)}>
               <ListOrdered className="h-4 w-4" />
               Renumerar IDs
             </Button>
           )}
-          <Button variant="outline" onClick={() => setImportOpen(true)}>
-            <Upload className="h-4 w-4" />
-            Importar Excel
-          </Button>
-          <Button variant="outline" onClick={exportExcel}>
-            <FileSpreadsheet className="h-4 w-4" />
-            Exportar Excel
-          </Button>
-          <Button variant="outline" onClick={exportPdf}>
-            <Download className="h-4 w-4" />
-            Exportar PDF
-          </Button>
+          {view === "ativos" && (
+            <>
+              <Button variant="outline" onClick={() => setImportOpen(true)}>
+                <Upload className="h-4 w-4" />
+                Importar Excel
+              </Button>
+              <Button variant="outline" onClick={exportExcel}>
+                <FileSpreadsheet className="h-4 w-4" />
+                Exportar Excel
+              </Button>
+              <Button variant="outline" onClick={exportPdf}>
+                <Download className="h-4 w-4" />
+                Exportar PDF
+              </Button>
+            </>
+          )}
         </div>
+      </div>
+
+      <div className="flex gap-2 border-b border-border">
+        <button
+          className={cn(
+            "px-4 py-2 text-sm font-medium",
+            view === "ativos" ? "border-b-2 border-primary text-primary" : "text-muted-foreground hover:text-foreground"
+          )}
+          onClick={() => switchView("ativos")}
+        >
+          Ativos
+        </button>
+        <button
+          className={cn(
+            "px-4 py-2 text-sm font-medium",
+            view === "removidos" ? "border-b-2 border-primary text-primary" : "text-muted-foreground hover:text-foreground"
+          )}
+          onClick={() => switchView("removidos")}
+        >
+          Removidos
+        </button>
       </div>
 
       <div className="flex flex-col gap-3">
@@ -601,7 +692,7 @@ export default function RecordsHistoryPage() {
           <Table>
             <TableHeader>
               <TableRow>
-                {canDelete() && (
+                {view === "ativos" && canDelete() && (
                   <TableHead className="w-8">
                     <input
                       type="checkbox"
@@ -656,7 +747,7 @@ export default function RecordsHistoryPage() {
             <TableBody>
               {pageItems.map((r) => (
                 <TableRow key={r.id} className="cursor-pointer" onClick={() => setSelected(r)}>
-                  {canDelete() && (
+                  {view === "ativos" && canDelete() && (
                     <TableCell onClick={(e) => e.stopPropagation()}>
                       <input
                         type="checkbox"
@@ -687,13 +778,13 @@ export default function RecordsHistoryPage() {
                           <Eye className="h-4 w-4" />
                           Visualizar
                         </DropdownMenuItem>
-                        {canEdit(r) && (
+                        {view === "ativos" && canEdit(r) && (
                           <DropdownMenuItem onClick={() => router.push(`/records/new?id=${r.id}`)}>
                             <Pencil className="h-4 w-4" />
                             Editar
                           </DropdownMenuItem>
                         )}
-                        {canDuplicate() && (
+                        {view === "ativos" && canDuplicate() && (
                           <DropdownMenuItem onClick={() => duplicateRecord(r)}>
                             <Copy className="h-4 w-4" />
                             Duplicar
@@ -703,10 +794,22 @@ export default function RecordsHistoryPage() {
                           <Download className="h-4 w-4" />
                           Baixar PDF
                         </DropdownMenuItem>
-                        {canDelete() && (
+                        {view === "ativos" && canDelete() && (
                           <DropdownMenuItem onClick={() => setDeleteTarget(r)}>
                             <Trash2 className="h-4 w-4 text-destructive" />
                             Excluir
+                          </DropdownMenuItem>
+                        )}
+                        {view === "removidos" && canDelete() && (
+                          <DropdownMenuItem onClick={() => restoreRecord(r)}>
+                            <RotateCcw className="h-4 w-4" />
+                            Restaurar
+                          </DropdownMenuItem>
+                        )}
+                        {view === "removidos" && canPermanentDelete() && (
+                          <DropdownMenuItem onClick={() => setPermanentDeleteTarget(r)}>
+                            <Trash2 className="h-4 w-4 text-destructive" />
+                            Excluir permanentemente
                           </DropdownMenuItem>
                         )}
                       </DropdownMenuContent>
@@ -865,7 +968,8 @@ export default function RecordsHistoryPage() {
             <DialogTitle>Excluir registro</DialogTitle>
           </DialogHeader>
           <p className="text-sm text-muted-foreground">
-            Tem certeza que deseja excluir o registro {deleteTarget?.recordNumber}? Esta ação não pode ser desfeita.
+            Tem certeza que deseja excluir o registro {deleteTarget?.recordNumber}? Ele será movido para a aba
+            Removidos e poderá ser restaurado depois.
           </p>
           <DialogFooter>
             <Button variant="outline" onClick={() => setDeleteTarget(null)}>
@@ -878,13 +982,37 @@ export default function RecordsHistoryPage() {
         </DialogContent>
       </Dialog>
 
+      <Dialog open={!!permanentDeleteTarget} onOpenChange={(o) => !o && setPermanentDeleteTarget(null)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Excluir permanentemente</DialogTitle>
+          </DialogHeader>
+          <p className="text-sm text-muted-foreground">
+            Tem certeza que deseja excluir permanentemente o registro {permanentDeleteTarget?.recordNumber}? Esta
+            ação não pode ser desfeita.
+          </p>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setPermanentDeleteTarget(null)}>
+              Cancelar
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={() => permanentDeleteTarget && permanentDeleteRecord(permanentDeleteTarget)}
+            >
+              Excluir permanentemente
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
       <Dialog open={bulkDeleteOpen} onOpenChange={(o) => !bulkDeleting && setBulkDeleteOpen(o)}>
         <DialogContent>
           <DialogHeader>
             <DialogTitle>Excluir registros selecionados</DialogTitle>
           </DialogHeader>
           <p className="text-sm text-muted-foreground">
-            Tem certeza que deseja excluir {selectedIds.size} registro(s)? Esta ação não pode ser desfeita.
+            Tem certeza que deseja excluir {selectedIds.size} registro(s)? Eles serão movidos para a aba Removidos e
+            poderão ser restaurados depois.
           </p>
           <DialogFooter>
             <Button variant="outline" onClick={() => setBulkDeleteOpen(false)} disabled={bulkDeleting}>
