@@ -53,7 +53,9 @@ service cloud.firestore {
       allow create: if isSignedIn() && role() != 'visualizador'
         && request.resource.data.authorId == request.auth.uid;
       allow update: if isAdminOrGerente()
-        || (isTecnico() && resource.data.authorId == request.auth.uid);
+        || (isTecnico() && resource.data.authorId == request.auth.uid
+            && request.resource.data.authorId == resource.data.authorId
+            && (request.resource.data.status == 'rascunho' || request.resource.data.status == 'pendente'));
       allow delete: if isAdmin();
 
       match /updates/{updateId} {
@@ -84,7 +86,7 @@ service cloud.firestore {
     // audit log: append-only by any signed-in user (actions are always tied
     // to the authenticated actor); no client may edit or delete history.
     match /logs/{logId} {
-      allow read: if isAdminOrGerente();
+      allow read: if isSignedIn();
       allow create: if isSignedIn() && request.resource.data.actorId == request.auth.uid;
       allow update, delete: if false;
     }
@@ -93,6 +95,15 @@ service cloud.firestore {
       allow read: if isAdminOrGerente();
       allow create: if isSignedIn() && request.resource.data.senderId == request.auth.uid;
       allow update, delete: if false;
+    }
+
+    // notifications: any signed-in user may create (fan-out to recipients);
+    // recipients read only their own and may only flip the `read` flag.
+    match /notifications/{notificationId} {
+      allow read: if isSignedIn() && resource.data.userId == request.auth.uid;
+      allow create: if isSignedIn();
+      allow update: if isSignedIn() && resource.data.userId == request.auth.uid;
+      allow delete: if false;
     }
 
     // shared sequence counters used to generate record numbers.

@@ -12,14 +12,14 @@ service firebase.storage {
         && request.resource.contentType.matches('image/.*|application/pdf|application/vnd.openxmlformats-officedocument.*|application/msword|application/vnd.ms-excel');
     }
 
-    match /records/{recordId}/{allPaths=**} {
+    match /attachments/{userId}/{allPaths=**} {
       allow read: if isSignedIn();
-      allow write: if isSignedIn() && isValidUpload();
+      allow write: if isSignedIn() && request.auth.uid == userId && isValidUpload();
     }
 
-    match /{allPaths=**} {
+    match /avatars/{userId} {
       allow read: if isSignedIn();
-      allow write: if isSignedIn() && isValidUpload();
+      allow write: if isSignedIn() && request.auth.uid == userId && isValidUpload();
     }
   }
 }

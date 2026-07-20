@@ -16,6 +16,8 @@ import { toast } from "sonner";
 import {
   Calendar,
   Check,
+  ChevronDown,
+  ChevronUp,
   Clock,
   Copy,
   FileSpreadsheet,
@@ -42,6 +44,7 @@ import {
   slugifyKey,
 } from "@/lib/forms";
 import type { FormDefinition, FormField, FormFieldType } from "@/types";
+import { cn } from "@/lib/utils";
 
 interface UpdateEntry {
   id: string;
@@ -566,38 +569,230 @@ function OptionsInput({
   options: string[];
   onCommit: (options: string[]) => void;
 }) {
-  const optionsKey = options.join(", ");
-  const [draft, setDraft] = useState(optionsKey);
-  const [focused, setFocused] = useState(false);
+  // Local editable copy so typing stays responsive; committed to the parent
+  // (and Firestore, debounced) on every structural change and on blur.
+  const externalKey = options.join(" ");
+  const [items, setItems] = useState<string[]>(options);
+  const [dragIndex, setDragIndex] = useState<number | null>(null);
+  const [editing, setEditing] = useState(false);
+  const [expanded, setExpanded] = useState(false);
 
-  // Keep the draft synced with `options` whenever it changes externally,
-  // unless the user is actively editing. Adjusted during render (React's
-  // recommended pattern) instead of an effect to avoid a cascading render.
-  // See: https://react.dev/learn/you-might-not-need-an-effect#adjusting-some-state-when-a-prop-changes
-  if (!focused && draft !== optionsKey) {
-    setDraft(optionsKey);
+  const COLLAPSE_LIMIT = 5;
+  const canCollapse = items.length > COLLAPSE_LIMIT;
+
+  // Re-sync with external options when they change and the user isn't editing.
+  if (!editing && items.join(" ") !== externalKey) {
+    setItems(options);
   }
 
-  function commit(text: string) {
-    onCommit(
-      text
-        .split(",")
-        .map((o) => o.trim())
-        .filter(Boolean)
-    );
+  function commit(next: string[]) {
+    const cleaned = next.map((o) => o.trim()).filter(Boolean);
+    onCommit(cleaned);
+  }
+
+  function setAt(index: number, value: string) {
+    setItems((prev) => prev.map((o, i) => (i === index ? value : o)));
+  }
+
+  function addOption() {
+    setItems((prev) => {
+      const next = [...prev, ""];
+      return next;
+    });
+    setEditing(true);
+  }
+
+  function removeAt(index: number) {
+    setItems((prev) => {
+      const next = prev.filter((_, i) => i !== index);
+      commit(next);
+      return next;
+    });
+  }
+
+  function move(from: number, to: number) {
+    setItems((prev) => {
+      if (to < 0 || to >= prev.length) return prev;
+      const next = [...prev];
+      const [moved] = next.splice(from, 1);
+      next.splice(to, 0, moved);
+      commit(next);
+      return next;
+    });
   }
 
   return (
-    <Input
-      placeholder="Opções separadas por vírgula"
-      value={draft}
-      onFocus={() => setFocused(true)}
-      onChange={(e) => setDraft(e.target.value)}
-      onBlur={() => {
-        setFocused(false);
-        commit(draft);
-      }}
-    />
+    <div className="flex flex-col gap-2 rounded-lg border border-border bg-muted/30 p-3">
+      <Label className="text-xs text-muted-foreground">Opções</Label>
+      {items.length === 0 ? (
+        <p className="text-xs text-muted-foreground">Nenhuma opção. Adicione a primeira abaixo.</p>
+      ) : (
+        <div className="flex flex-col gap-2">
+          {/* Head rows are always visible. Extra rows (beyond the limit) live in
+              an animated grid wrapper that collapses to 0fr / expands to 1fr,
+              keeping every row mounted so state, edits and scroll are preserved. */}
+          {items.slice(0, COLLAPSE_LIMIT).map((opt, index) => (
+            <OptionRow
+              key={index}
+              opt={opt}
+              index={index}
+              total={items.length}
+              onDragStart={() => setDragIndex(index)}
+              onDrop={() => {
+                if (dragIndex !== null && dragIndex !== index) move(dragIndex, index);
+                setDragIndex(null);
+              }}
+              onFocus={() => setEditing(true)}
+              onChange={(v) => setAt(index, v)}
+              onBlur={() => {
+                setEditing(false);
+                commit(items);
+              }}
+              onMoveUp={() => move(index, index - 1)}
+              onMoveDown={() => move(index, index + 1)}
+              onRemove={() => removeAt(index)}
+            />
+          ))}
+          {canCollapse && (
+            <div
+              className={cn(
+                "grid transition-[grid-template-rows] duration-300 ease-in-out",
+                expanded ? "grid-rows-[1fr]" : "grid-rows-[0fr]"
+              )}
+            >
+              <div className="overflow-hidden">
+                <div className="flex flex-col gap-2">
+                  {items.slice(COLLAPSE_LIMIT).map((opt, i) => {
+                    const index = i + COLLAPSE_LIMIT;
+                    return (
+                      <OptionRow
+                        key={index}
+                        opt={opt}
+                        index={index}
+                        total={items.length}
+                        onDragStart={() => setDragIndex(index)}
+                        onDrop={() => {
+                          if (dragIndex !== null && dragIndex !== index) move(dragIndex, index);
+                          setDragIndex(null);
+                        }}
+                        onFocus={() => setEditing(true)}
+                        onChange={(v) => setAt(index, v)}
+                        onBlur={() => {
+                          setEditing(false);
+                          commit(items);
+                        }}
+                        onMoveUp={() => move(index, index - 1)}
+                        onMoveDown={() => move(index, index + 1)}
+                        onRemove={() => removeAt(index)}
+                      />
+                    );
+                  })}
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+      <div className="flex flex-wrap items-center gap-2">
+        <Button type="button" variant="outline" size="sm" onClick={addOption}>
+          <Plus className="h-4 w-4" />
+          Adicionar opção
+        </Button>
+        {canCollapse && (
+          <Button type="button" variant="ghost" size="sm" onClick={() => setExpanded((v) => !v)}>
+            {expanded ? (
+              <>
+                <ChevronUp className="h-4 w-4" />
+                Ver menos
+              </>
+            ) : (
+              <>
+                <ChevronDown className="h-4 w-4" />
+                Ver mais ({items.length - COLLAPSE_LIMIT})
+              </>
+            )}
+          </Button>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function OptionRow({
+  opt,
+  index,
+  total,
+  onDragStart,
+  onDrop,
+  onFocus,
+  onChange,
+  onBlur,
+  onMoveUp,
+  onMoveDown,
+  onRemove,
+}: {
+  opt: string;
+  index: number;
+  total: number;
+  onDragStart: () => void;
+  onDrop: () => void;
+  onFocus: () => void;
+  onChange: (value: string) => void;
+  onBlur: () => void;
+  onMoveUp: () => void;
+  onMoveDown: () => void;
+  onRemove: () => void;
+}) {
+  return (
+    <div
+      draggable
+      onDragStart={onDragStart}
+      onDragOver={(e) => e.preventDefault()}
+      onDrop={onDrop}
+      className="flex items-center gap-2 rounded-md border border-border bg-background p-1.5"
+    >
+      <GripVertical className="h-4 w-4 shrink-0 cursor-grab text-muted-foreground" />
+      <Input
+        value={opt}
+        placeholder={`Opção ${index + 1}`}
+        onFocus={onFocus}
+        onChange={(e) => onChange(e.target.value)}
+        onBlur={onBlur}
+        className="h-8 flex-1"
+      />
+      <Button
+        type="button"
+        variant="ghost"
+        size="icon"
+        className="h-8 w-8"
+        aria-label="Mover opção para cima"
+        disabled={index === 0}
+        onClick={onMoveUp}
+      >
+        <ChevronUp className="h-4 w-4" />
+      </Button>
+      <Button
+        type="button"
+        variant="ghost"
+        size="icon"
+        className="h-8 w-8"
+        aria-label="Mover opção para baixo"
+        disabled={index === total - 1}
+        onClick={onMoveDown}
+      >
+        <ChevronDown className="h-4 w-4" />
+      </Button>
+      <Button
+        type="button"
+        variant="ghost"
+        size="icon"
+        className="h-8 w-8"
+        aria-label="Remover opção"
+        onClick={onRemove}
+      >
+        <Trash2 className="h-4 w-4 text-destructive" />
+      </Button>
+    </div>
   );
 }
 

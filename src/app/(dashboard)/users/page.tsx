@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { doc, onSnapshot, Timestamp, updateDoc } from "firebase/firestore";
 import { toast } from "sonner";
 import { Search } from "lucide-react";
-import { usersCol } from "@/lib/firestore-helpers";
+import { usersCol, writeAuditLog } from "@/lib/firestore-helpers";
 import { db } from "@/lib/firebase";
 import { useAuth } from "@/lib/auth-context";
 import { roleLabels } from "@/lib/forms";
@@ -72,9 +72,19 @@ export default function UsersPage() {
       return;
     }
     const prev = users;
+    const target = users.find((x) => x.id === userId);
     setUsers((u) => u.map((x) => (x.id === userId ? { ...x, role } : x)));
     try {
       await updateDoc(doc(db, "users", userId), { role });
+      await writeAuditLog(
+        { uid: profile?.id, name: profile?.name, role: profile?.role },
+        {
+          action: "Alteração de responsável/perfil de usuário",
+          detail: `${target?.name || target?.email || userId}: ${roleLabels[target?.role as UserRole] || target?.role || "—"} → ${roleLabels[role]}`,
+          statusBefore: target?.role,
+          statusAfter: role,
+        }
+      );
       toast.success("Função atualizada com sucesso");
     } catch {
       setUsers(prev);

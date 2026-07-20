@@ -105,8 +105,33 @@ export interface LogEntry {
   action: string;
   actorId?: string;
   actorName?: string;
+  actorRole?: UserRole | string;
+  recordNumber?: string;
+  statusBefore?: string;
+  statusAfter?: string;
   detail?: string;
   changes?: Record<string, { before: unknown; after: unknown }>;
+  createdAt?: string;
+}
+
+export type NotificationType =
+  | "aprovacao_pendente"
+  | "aprovado"
+  | "rejeitado"
+  | "reajuste"
+  | "criado"
+  | "geral";
+
+export interface AppNotification {
+  id: string;
+  userId: string;
+  type: NotificationType;
+  title: string;
+  message?: string;
+  recordId?: string;
+  recordNumber?: string;
+  href?: string;
+  read?: boolean;
   createdAt?: string;
 }
 

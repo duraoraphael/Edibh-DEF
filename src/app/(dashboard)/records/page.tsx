@@ -7,6 +7,7 @@ import {
   collection,
   deleteDoc,
   doc,
+  limit,
   onSnapshot,
   orderBy,
   query,
@@ -36,24 +37,21 @@ import {
 } from "lucide-react";
 import { exportRecordsToExcel } from "@/lib/excel-export";
 import { db } from "@/lib/firebase";
-import { logsCol, recordsCol } from "@/lib/firestore-helpers";
+import { logsCol, recordsCol, writeAuditLog } from "@/lib/firestore-helpers";
 import { useAuth } from "@/lib/auth-context";
-import { DEFAULT_FORM_ID, fieldValue, statusLabels, statusVariant } from "@/lib/forms";
+import { DEFAULT_FORM_ID, fieldValue, statusLabels } from "@/lib/forms";
 import { ExcelImportDialog } from "@/components/records/excel-import-dialog";
+import { RecordRow } from "@/components/records/record-row";
 import { generateRecordPdf, generateRecordsTablePdf } from "@/lib/pdf";
 import type { AppRecord, FormDefinition, FormField, LogEntry } from "@/types";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { StatusBadge } from "@/components/ui/status-badge";
+import { EmptyState } from "@/components/ui/empty-state";
+import { FilterSelect } from "@/components/ui/filter-select";
+import { SelectItem } from "@/components/ui/select";
+import { Table, TableBody, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -113,6 +111,7 @@ export default function RecordsHistoryPage() {
   const [bulkDeleteOpen, setBulkDeleteOpen] = useState(false);
   const [bulkDeleting, setBulkDeleting] = useState(false);
   const [view, setView] = useState<"ativos" | "removidos">("ativos");
+  const [dense, setDense] = useState(false);
   const [renumberOpen, setRenumberOpen] = useState(false);
   const [renumbering, setRenumbering] = useState(false);
   const [formFields, setFormFields] = useState<FormField[]>([]);
@@ -133,7 +132,7 @@ export default function RecordsHistoryPage() {
 
   useEffect(() => {
     const unsub = onSnapshot(
-      query(recordsCol(), orderBy("createdAt", "desc")),
+      query(recordsCol(), orderBy("createdAt", "desc"), limit(1000)),
       (snap) => {
         setRecords(snap.docs.map((d) => d.data()));
         setLoading(false);
@@ -193,15 +192,17 @@ export default function RecordsHistoryPage() {
         authorName: profile?.name || user?.email || "Usuário",
         createdAt: serverTimestamp(),
       });
-      await addDoc(logsCol(), {
-        id: "",
-        recordId: selected.id,
-        action: "Atualização do fluxo adicionada",
-        actorId: user?.uid,
-        actorName: profile?.name || user?.email || undefined,
-        detail: text,
-        createdAt: new Date().toISOString(),
-      });
+      await writeAuditLog(
+        { uid: user?.uid, name: profile?.name || user?.email || undefined, role: profile?.role },
+        {
+          action: "Atualização do fluxo adicionada",
+          recordId: selected.id,
+          recordNumber: selected.recordNumber,
+          statusBefore: selected.status,
+          statusAfter: selected.status,
+          detail: text,
+        }
+      );
       setNewFlowUpdateText("");
       toast.success("Atualização adicionada");
     } catch {
@@ -364,15 +365,16 @@ export default function RecordsHistoryPage() {
 
   async function deleteRecord(r: AppRecord) {
     try {
-      await addDoc(logsCol(), {
-        id: "",
-        recordId: r.id,
-        action: "Excluído (movido para Removidos)",
-        actorId: user?.uid,
-        actorName: profile?.name || user?.email || undefined,
-        detail: r.recordNumber,
-        createdAt: new Date().toISOString(),
-      });
+      await writeAuditLog(
+        { uid: user?.uid, name: profile?.name || user?.email || undefined, role: profile?.role },
+        {
+          action: "Excluído (movido para Removidos)",
+          recordId: r.id,
+          recordNumber: r.recordNumber,
+          statusBefore: r.status,
+          statusAfter: r.status,
+        }
+      );
       await updateDoc(doc(db, "records", r.id), {
         deletedAt: new Date().toISOString(),
         deletedBy: user?.uid || null,
@@ -392,15 +394,16 @@ export default function RecordsHistoryPage() {
     for (const id of ids) {
       const r = records.find((rec) => rec.id === id);
       try {
-        await addDoc(logsCol(), {
-          id: "",
-          recordId: id,
-          action: "Excluído (movido para Removidos)",
-          actorId: user?.uid,
-          actorName: profile?.name || user?.email || undefined,
-          detail: r?.recordNumber,
-          createdAt: new Date().toISOString(),
-        });
+        await writeAuditLog(
+          { uid: user?.uid, name: profile?.name || user?.email || undefined, role: profile?.role },
+          {
+            action: "Excluído (movido para Removidos)",
+            recordId: id,
+            recordNumber: r?.recordNumber,
+            statusBefore: r?.status,
+            statusAfter: r?.status,
+          }
+        );
         await updateDoc(doc(db, "records", id), {
           deletedAt: new Date().toISOString(),
           deletedBy: user?.uid || null,
@@ -419,15 +422,16 @@ export default function RecordsHistoryPage() {
 
   async function restoreRecord(r: AppRecord) {
     try {
-      await addDoc(logsCol(), {
-        id: "",
-        recordId: r.id,
-        action: "Restaurado",
-        actorId: user?.uid,
-        actorName: profile?.name || user?.email || undefined,
-        detail: r.recordNumber,
-        createdAt: new Date().toISOString(),
-      });
+      await writeAuditLog(
+        { uid: user?.uid, name: profile?.name || user?.email || undefined, role: profile?.role },
+        {
+          action: "Restaurado",
+          recordId: r.id,
+          recordNumber: r.recordNumber,
+          statusBefore: r.status,
+          statusAfter: r.status,
+        }
+      );
       await updateDoc(doc(db, "records", r.id), {
         deletedAt: null,
         deletedBy: null,
@@ -441,15 +445,16 @@ export default function RecordsHistoryPage() {
 
   async function permanentDeleteRecord(r: AppRecord) {
     try {
-      await addDoc(logsCol(), {
-        id: "",
-        recordId: r.id,
-        action: "Excluído permanentemente",
-        actorId: user?.uid,
-        actorName: profile?.name || user?.email || undefined,
-        detail: r.recordNumber,
-        createdAt: new Date().toISOString(),
-      });
+      await writeAuditLog(
+        { uid: user?.uid, name: profile?.name || user?.email || undefined, role: profile?.role },
+        {
+          action: "Excluído permanentemente",
+          recordId: r.id,
+          recordNumber: r.recordNumber,
+          statusBefore: r.status,
+          statusAfter: "",
+        }
+      );
       await deleteDoc(doc(db, "records", r.id));
       toast.success("Registro excluído permanentemente");
       setPermanentDeleteTarget(null);
@@ -495,14 +500,10 @@ export default function RecordsHistoryPage() {
         await setDoc(doc(db, "settings", `counter_${year}`), { value: count, year }, { merge: true });
       }
 
-      await addDoc(logsCol(), {
-        id: "",
-        recordId: "",
-        action: "Renumeração geral de IDs",
-        actorId: user?.uid,
-        actorName: profile?.name || user?.email || undefined,
-        createdAt: new Date().toISOString(),
-      });
+      await writeAuditLog(
+        { uid: user?.uid, name: profile?.name || user?.email || undefined, role: profile?.role },
+        { action: "Renumeração geral de IDs", detail: "Alteração de número do fluxo (renumeração sequencial)" }
+      );
 
       toast.success("IDs renumerados em ordem");
       setRenumberOpen(false);
@@ -614,6 +615,11 @@ export default function RecordsHistoryPage() {
         >
           Removidos
         </button>
+        <div className="ml-auto flex items-center">
+          <Button variant="ghost" size="sm" onClick={() => setDense((d) => !d)} aria-pressed={dense}>
+            {dense ? "Densidade: Compacta" : "Densidade: Confortável"}
+          </Button>
+        </div>
       </div>
 
       <div className="flex flex-col gap-3">
@@ -685,17 +691,16 @@ export default function RecordsHistoryPage() {
             ))}
           </div>
         ) : pageItems.length === 0 ? (
-          <div className="flex flex-col items-center justify-center gap-2 p-12 text-center">
-            <p className="text-sm text-muted-foreground">Nenhum registro encontrado</p>
-          </div>
+          <EmptyState icon={Search} text="Nenhum registro encontrado" className="p-12" />
         ) : (
           <Table>
-            <TableHeader>
+            <TableHeader className="sticky top-0 z-10 bg-card">
               <TableRow>
                 {view === "ativos" && canDelete() && (
                   <TableHead className="w-8">
                     <input
                       type="checkbox"
+                      aria-label="Selecionar todos os registros da página"
                       checked={pageItems.length > 0 && pageItems.every((r) => selectedIds.has(r.id))}
                       onChange={toggleSelectAllOnPage}
                     />
@@ -746,30 +751,18 @@ export default function RecordsHistoryPage() {
             </TableHeader>
             <TableBody>
               {pageItems.map((r) => (
-                <TableRow key={r.id} className="cursor-pointer" onClick={() => setSelected(r)}>
-                  {view === "ativos" && canDelete() && (
-                    <TableCell onClick={(e) => e.stopPropagation()}>
-                      <input
-                        type="checkbox"
-                        checked={selectedIds.has(r.id)}
-                        onChange={() => toggleSelected(r.id)}
-                      />
-                    </TableCell>
-                  )}
-                  <TableCell className="font-medium">{r.recordNumber || "—"}</TableCell>
-                  <TableCell>{fieldValue(r, "instalacao") || "—"}</TableCell>
-                  <TableCell>{fieldValue(r, "sistema") || "—"}</TableCell>
-                  <TableCell>{fieldValue(r, "equipamento") || "—"}</TableCell>
-                  <TableCell>{fieldValue(r, "gerencia") || "—"}</TableCell>
-                  <TableCell>{r.createdAt ? new Date(r.createdAt).toLocaleDateString() : "—"}</TableCell>
-                  <TableCell>
-                    <Badge variant={statusVariant[r.status]}>{statusLabels[r.status]}</Badge>
-                  </TableCell>
-                  <TableCell>{r.authorName || "—"}</TableCell>
-                  <TableCell className="text-right" onClick={(e) => e.stopPropagation()}>
+                <RecordRow
+                  key={r.id}
+                  record={r}
+                  dense={dense}
+                  onClick={() => setSelected(r)}
+                  selectable={view === "ativos" && canDelete()}
+                  selected={selectedIds.has(r.id)}
+                  onToggleSelected={() => toggleSelected(r.id)}
+                  actions={
                     <DropdownMenu>
                       <DropdownMenuTrigger asChild>
-                        <Button variant="ghost" size="icon">
+                        <Button variant="ghost" size="icon" aria-label="Abrir ações do registro">
                           <MoreVertical className="h-4 w-4" />
                         </Button>
                       </DropdownMenuTrigger>
@@ -814,8 +807,8 @@ export default function RecordsHistoryPage() {
                         )}
                       </DropdownMenuContent>
                     </DropdownMenu>
-                  </TableCell>
-                </TableRow>
+                  }
+                />
               ))}
             </TableBody>
           </Table>
@@ -846,7 +839,7 @@ export default function RecordsHistoryPage() {
               <DialogHeader className="border-b border-border px-6 py-4">
                 <DialogTitle className="flex items-center gap-3">
                   {selected.recordNumber || selected.id}
-                  <Badge variant={statusVariant[selected.status]}>{statusLabels[selected.status]}</Badge>
+                  <StatusBadge status={selected.status} />
                 </DialogTitle>
                 <p className="text-sm text-muted-foreground">Responsável: {selected.authorName || "—"}</p>
               </DialogHeader>
@@ -1053,29 +1046,5 @@ export default function RecordsHistoryPage() {
         onImported={() => setImportOpen(false)}
       />
     </div>
-  );
-}
-
-function FilterSelect({
-  label,
-  value,
-  onChange,
-  children,
-}: {
-  label: string;
-  value: string;
-  onChange: (v: string) => void;
-  children: React.ReactNode;
-}) {
-  return (
-    <Select value={value} onValueChange={onChange}>
-      <SelectTrigger>
-        <SelectValue placeholder={label} />
-      </SelectTrigger>
-      <SelectContent>
-        <SelectItem value={ALL}>{label}: Todos</SelectItem>
-        {children}
-      </SelectContent>
-    </Select>
   );
 }

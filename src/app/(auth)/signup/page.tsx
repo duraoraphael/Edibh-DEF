@@ -4,7 +4,7 @@ import { useState, useEffect } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { motion } from "framer-motion";
-import { Leaf, Loader2 } from "lucide-react";
+import { Info, Leaf, Loader2 } from "lucide-react";
 import { toast } from "sonner";
 import { useAuth } from "@/lib/auth-context";
 import { Button } from "@/components/ui/button";
@@ -38,7 +38,7 @@ export default function SignupPage() {
     setSubmitting(true);
     try {
       await signUp(name, email, password);
-      toast.success("Conta criada com sucesso");
+      toast.success("Conta criada como Visualizador. Aguarde a aprovação de um administrador para liberar mais acessos.");
       router.replace("/dashboard");
     } catch {
       toast.error("Não foi possível criar a conta. Tente novamente.");
@@ -64,6 +64,13 @@ export default function SignupPage() {
               <h1 className="text-2xl font-semibold tracking-tight">Criar conta</h1>
               <p className="text-sm text-muted-foreground">Cadastre-se no sistema Fluxo de Equipamentos</p>
             </div>
+          </div>
+          <div className="mb-5 flex items-start gap-2 rounded-lg border border-primary-200 bg-primary-50 p-3 text-xs text-primary-800">
+            <Info className="mt-0.5 h-4 w-4 shrink-0" aria-hidden />
+            <p>
+              Novas contas são criadas com o perfil <strong>Visualizador</strong> e dependem da aprovação de um{" "}
+              <strong>Administrador</strong> para obterem acesso completo ao sistema.
+            </p>
           </div>
           <form onSubmit={handleSubmit} className="flex flex-col gap-4">
             <div className="flex flex-col gap-1.5">

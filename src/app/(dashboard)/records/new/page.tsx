@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { addDoc, doc, getDoc, onSnapshot, serverTimestamp, setDoc } from "firebase/firestore";
+import { doc, getDoc, onSnapshot, serverTimestamp, setDoc } from "firebase/firestore";
 import { getDownloadURL, ref, uploadBytesResumable } from "firebase/storage";
 import { toast } from "sonner";
 import { Loader2, Paperclip, UploadCloud, X } from "lucide-react";
@@ -16,7 +16,7 @@ import {
   recordNumberExists,
   sanitizeForFirestore,
 } from "@/lib/forms";
-import { logsCol } from "@/lib/firestore-helpers";
+import { createNotifications, getUserIdsByRoles, writeAuditLog } from "@/lib/firestore-helpers";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -32,7 +32,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { cn } from "@/lib/utils";
-import type { AppRecord, AttachmentRef, FormDefinition, FormField } from "@/types";
+import type { AppRecord, AttachmentRef, FormDefinition, FormField, RecordStatus } from "@/types";
 
 const TEXTAREA_LIMIT = 1000;
 
@@ -107,6 +107,11 @@ export default function NewRecordPage() {
     }
   });
   const [existingRecordNumber, setExistingRecordNumber] = useState<string | undefined>();
+  // When editing a record that was already submitted, autosave must not
+  // downgrade its status back to "rascunho" (which would hide it from the
+  // Histórico "Ativos" view) nor overwrite its original createdAt.
+  const [existingStatus, setExistingStatus] = useState<RecordStatus | null>(null);
+  const [existingCreatedAt, setExistingCreatedAt] = useState<string | null>(null);
   const [manualRecordNumber, setManualRecordNumber] = useState("");
   const isAdmin = profile?.role === "admin";
   const [uploadProgress, setUploadProgress] = useState<Record<string, number>>({});
@@ -153,6 +158,8 @@ export default function NewRecordPage() {
       setValues(data.data || {});
       setAttachments(data.attachments || []);
       setExistingRecordNumber(data.recordNumber);
+      setExistingStatus(data.status ?? null);
+      setExistingCreatedAt(data.createdAt ?? null);
       setManualRecordNumber(data.recordNumber || "");
     });
   }, [editId]);
@@ -165,15 +172,19 @@ export default function NewRecordPage() {
       );
       if (!user) return;
       setSavingDraft(true);
+      // When editing an already-submitted record, keep its current status and
+      // original createdAt so an autosave never turns it back into a rascunho
+      // (which would hide it from the Histórico "Ativos" list) or reset its date.
+      const isEditingExisting = !!editId && !!existingStatus;
       const payload = sanitizeForFirestore({
-        status: "rascunho" as const,
+        status: isEditingExisting ? existingStatus : ("rascunho" as const),
         authorId: user.uid,
         authorName: profile?.name || "Usuário",
         attachments: atts,
         formId: activeForm?.id || null,
         data: nextValues,
         updatedAt: new Date().toISOString(),
-        createdAt: new Date().toISOString(),
+        createdAt: existingCreatedAt ?? new Date().toISOString(),
       });
       try {
         await setDoc(doc(db, "records", draftId), payload, { merge: true });
@@ -184,7 +195,7 @@ export default function NewRecordPage() {
         setSavingDraft(false);
       }
     },
-    [draftId, user, profile, activeForm]
+    [draftId, user, profile, activeForm, editId, existingStatus, existingCreatedAt]
   );
 
   function updateValue(field: FormField, raw: unknown) {
@@ -323,7 +334,7 @@ export default function NewRecordPage() {
         formId: activeForm?.id || null,
         data: values,
         updatedAt: new Date().toISOString(),
-        createdAt: new Date().toISOString(),
+        createdAt: existingCreatedAt ?? new Date().toISOString(),
       });
       try {
         await setDoc(doc(db, "records", draftId), recordPayload, { merge: true });
@@ -349,16 +360,32 @@ export default function NewRecordPage() {
       }
 
       try {
-        await addDoc(logsCol(), {
-          id: "",
+        await writeAuditLog(
+          { uid: user.uid, name: profile?.name || "Usuário", role: profile?.role },
+          {
+            action: editId ? "Reenviado após reajuste" : "Criado",
+            recordId: draftId,
+            recordNumber,
+            statusBefore: editId ? "reajuste" : "",
+            statusAfter: "pendente",
+          }
+        );
+      } catch (error) {
+        logFirestoreError({ fn: "handleSubmit:writeAuditLog" }, error);
+      }
+
+      try {
+        const approverIds = await getUserIdsByRoles(["admin", "gerente"]);
+        await createNotifications(approverIds, {
+          type: "aprovacao_pendente",
+          title: "Aprovação pendente",
+          message: `Registro ${recordNumber} aguarda análise`,
           recordId: draftId,
-          action: editId ? "Reenviado após reajuste" : "Criado",
-          actorId: user.uid,
-          actorName: profile?.name || "Usuário",
-          createdAt: new Date().toISOString(),
+          recordNumber,
+          href: "/approvals",
         });
       } catch (error) {
-        logFirestoreError({ fn: "handleSubmit:addDoc(logs)" }, error);
+        logFirestoreError({ fn: "handleSubmit:createNotifications" }, error);
       }
 
       window.localStorage.removeItem(`edibh_draft_${draftId}`);

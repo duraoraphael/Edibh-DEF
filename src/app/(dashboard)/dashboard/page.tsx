@@ -27,18 +27,13 @@ import {
 } from "recharts";
 import type { ReactElement } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Switch } from "@/components/ui/switch";
 import { Input } from "@/components/ui/input";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
+import { Badge } from "@/components/ui/badge";
+import { EmptyState } from "@/components/ui/empty-state";
+import { FilterSelect } from "@/components/ui/filter-select";
 import {
   Dialog,
   DialogContent,
@@ -542,36 +537,6 @@ export default function DashboardPage() {
   );
 }
 
-function FilterSelect({
-  label,
-  value,
-  onChange,
-  options,
-  labels,
-}: {
-  label: string;
-  value: string;
-  onChange: (v: string) => void;
-  options: string[];
-  labels?: Record<string, string>;
-}) {
-  return (
-    <Select value={value} onValueChange={onChange}>
-      <SelectTrigger>
-        <SelectValue placeholder={label} />
-      </SelectTrigger>
-      <SelectContent>
-        <SelectItem value={ALL}>{label}: Todos</SelectItem>
-        {options.map((o) => (
-          <SelectItem key={o} value={o}>
-            {labels?.[o] || o}
-          </SelectItem>
-        ))}
-      </SelectContent>
-    </Select>
-  );
-}
-
 function truncateLabel(name: string, max = 14): string {
   return name.length > max ? `${name.slice(0, max - 1)}…` : name;
 }
@@ -619,14 +584,6 @@ function CategoryBarChart({ data }: { data: { name: string; total: number }[] })
           </BarChart>
         </ResponsiveContainer>
       </div>
-    </div>
-  );
-}
-
-function EmptyState({ text }: { text: string }) {
-  return (
-    <div className="flex h-full flex-col items-center justify-center gap-2 text-center">
-      <p className="text-sm text-muted-foreground">{text}</p>
     </div>
   );
 }

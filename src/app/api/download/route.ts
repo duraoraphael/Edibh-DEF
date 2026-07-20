@@ -11,11 +11,11 @@ export async function GET(req: NextRequest) {
   } catch {
     return NextResponse.json({ error: "url inválida" }, { status: 400 });
   }
-  if (!/^https:$/.test(target.protocol) || !target.hostname.endsWith("firebasestorage.googleapis.com")) {
+  if (!/^https:$/.test(target.protocol) || target.hostname !== "firebasestorage.googleapis.com") {
     return NextResponse.json({ error: "host não permitido" }, { status: 400 });
   }
 
-  const res = await fetch(target.toString());
+  const res = await fetch(target.toString(), { redirect: "error" });
   if (!res.ok || !res.body) {
     return NextResponse.json({ error: "falha ao buscar arquivo" }, { status: 502 });
   }

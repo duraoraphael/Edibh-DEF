@@ -17,8 +17,9 @@ import {
   signOut as firebaseSignOut,
   User as FirebaseUser,
 } from "firebase/auth";
-import { doc, onSnapshot, setDoc, updateDoc, serverTimestamp } from "firebase/firestore";
+import { doc, getDoc, onSnapshot, setDoc, updateDoc, serverTimestamp } from "firebase/firestore";
 import { auth, db } from "./firebase";
+import { writeAuditLog } from "./firestore-helpers";
 import type { User } from "@/types";
 
 interface AuthContextValue {
@@ -82,6 +83,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     await updateDoc(doc(db, "users", credential.user.uid), {
       lastActive: serverTimestamp(),
     }).catch(() => {});
+    try {
+      const snap = await getDoc(doc(db, "users", credential.user.uid));
+      const data = snap.exists() ? (snap.data() as Omit<User, "id">) : null;
+      await writeAuditLog(
+        {
+          uid: credential.user.uid,
+          name: data?.name || credential.user.email || undefined,
+          role: data?.role,
+        },
+        { action: "Login" }
+      );
+    } catch {}
   }, []);
 
   const signUp = useCallback(async (name: string, email: string, password: string) => {
@@ -103,8 +116,20 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const signOut = useCallback(async () => {
+    try {
+      if (auth.currentUser) {
+        await writeAuditLog(
+          {
+            uid: auth.currentUser.uid,
+            name: profile?.name || auth.currentUser.email || undefined,
+            role: profile?.role,
+          },
+          { action: "Logout" }
+        );
+      }
+    } catch {}
     await firebaseSignOut(auth);
-  }, []);
+  }, [profile]);
 
   return (
     <AuthContext.Provider

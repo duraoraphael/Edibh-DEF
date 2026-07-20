@@ -2,9 +2,11 @@
 
 import { useRouter } from "next/navigation";
 import Image from "next/image";
-import { Bell, Search, LogOut, UserCircle, Settings } from "lucide-react";
+import { Search, LogOut, UserCircle, Settings } from "lucide-react";
 import { useAuth } from "@/lib/auth-context";
 import { roleLabels } from "@/lib/forms";
+import { useSearch } from "@/components/layout/search-context";
+import { NotificationBell } from "@/components/layout/notification-bell";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import {
   DropdownMenu,
@@ -18,6 +20,7 @@ import {
 export function Topbar() {
   const { profile, signOut } = useAuth();
   const router = useRouter();
+  const { openSearch } = useSearch();
 
   return (
     <header className="sticky top-0 z-30 flex h-18 items-center gap-4 bg-primary px-6 text-white shadow-sm">
@@ -45,22 +48,22 @@ export function Topbar() {
       </div>
 
       <div className="flex flex-1 items-center justify-center px-2">
-        <div className="relative w-full max-w-md">
-          <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-white/70" />
-          <input
-            placeholder="Buscar... (Ctrl+K)"
-            className="h-10 w-full rounded-lg border border-white/20 bg-white/10 pl-9 pr-3 text-sm text-white placeholder:text-white/70 outline-none transition-colors focus:border-white/40 focus:ring-2 focus:ring-white/25"
-            onFocus={(e) => e.currentTarget.blur()}
-            onClick={() => document.dispatchEvent(new KeyboardEvent("keydown", { key: "k", ctrlKey: true }))}
-            readOnly
-          />
-        </div>
+        <button
+          type="button"
+          onClick={openSearch}
+          aria-label="Abrir busca global"
+          className="flex h-10 w-full max-w-md items-center gap-2 rounded-lg border border-white/25 bg-white/10 px-3 text-sm transition-colors hover:bg-white/15 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/40"
+        >
+          <Search className="h-4 w-4 shrink-0 text-white/90" aria-hidden />
+          <span className="text-white/90">Buscar páginas e registros...</span>
+          <span className="ml-auto hidden rounded border border-white/40 px-1.5 py-0.5 text-[10px] text-white sm:inline">
+            Ctrl+K
+          </span>
+        </button>
       </div>
 
       <div className="flex shrink-0 items-center gap-2">
-        <button className="relative flex h-10 w-10 items-center justify-center rounded-lg text-white/85 transition-colors hover:bg-white/10 hover:text-white">
-          <Bell className="h-5 w-5" />
-        </button>
+        <NotificationBell />
 
         <DropdownMenu>
           <DropdownMenuTrigger className="flex items-center gap-2 rounded-lg px-2 py-1.5 outline-none transition-colors hover:bg-white/10">

@@ -6,7 +6,9 @@ import { Loader2 } from "lucide-react";
 import { useAuth } from "@/lib/auth-context";
 import { Sidebar } from "@/components/layout/sidebar";
 import { Topbar } from "@/components/layout/topbar";
+import { Footer } from "@/components/layout/footer";
 import { CommandPalette } from "@/components/layout/command-palette";
+import { SearchProvider } from "@/components/layout/search-context";
 import { isRouteAllowed } from "@/lib/forms";
 
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
@@ -33,15 +35,18 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   }
 
   return (
-    <div className="flex min-h-screen w-full bg-background">
-      <Sidebar />
-      <div className="flex min-h-screen flex-1 flex-col">
-        <Topbar />
-        <main className="flex-1 p-4 md:p-8">
-          <div className="mx-auto w-full max-w-350">{children}</div>
-        </main>
+    <SearchProvider>
+      <div className="flex min-h-screen w-full bg-background">
+        <Sidebar />
+        <div className="flex min-h-screen flex-1 flex-col">
+          <Topbar />
+          <main className="flex-1 p-4 md:p-8">
+            <div className="mx-auto w-full max-w-350">{children}</div>
+          </main>
+          <Footer />
+        </div>
+        <CommandPalette />
       </div>
-      <CommandPalette />
-    </div>
+    </SearchProvider>
   );
 }
