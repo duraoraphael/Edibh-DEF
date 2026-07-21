@@ -581,15 +581,19 @@ export default function NewRecordPage() {
   );
 }
 
+function sortOptions(options?: string[]): string[] {
+  return Array.from(new Set(options || [])).sort((a, b) => a.localeCompare(b, undefined, { sensitivity: "base" }));
+}
+
 function resolveOptions(field: FormField, allFields?: FormField[], values?: Record<string, unknown>): string[] {
   if (field.dependsOnFieldId && field.optionsByParentValue) {
     const parentValue = values?.[allFields?.find((f) => f.id === field.dependsOnFieldId)?.key || ""];
     if (typeof parentValue === "string" && parentValue) {
-      return field.optionsByParentValue[parentValue] || [];
+      return sortOptions(field.optionsByParentValue[parentValue]);
     }
     return [];
   }
-  return field.options || [];
+  return sortOptions(field.options);
 }
 
 function DynamicField({
@@ -652,8 +656,8 @@ function DynamicField({
             <SelectValue placeholder={field.placeholder || "Selecione"} />
           </SelectTrigger>
           <SelectContent>
-            {options.map((o) => (
-              <SelectItem key={o} value={o}>
+            {options.map((o, index) => (
+              <SelectItem key={`${field.id}-option-${index}`} value={o}>
                 {o}
               </SelectItem>
             ))}
@@ -663,8 +667,8 @@ function DynamicField({
     case "radio":
       return (
         <div className="flex flex-col gap-1.5">
-          {options.map((o) => (
-            <label key={o} className="flex items-center gap-2 text-sm">
+          {options.map((o, index) => (
+            <label key={`${field.id}-radio-${index}`} className="flex items-center gap-2 text-sm">
               <input
                 type="radio"
                 name={field.id}
@@ -680,8 +684,8 @@ function DynamicField({
       const selected = Array.isArray(value) ? (value as string[]) : [];
       return (
         <div className="flex flex-col gap-1.5">
-          {options.map((o) => (
-            <label key={o} className="flex items-center gap-2 text-sm">
+          {options.map((o, index) => (
+            <label key={`${field.id}-checkbox-${index}`} className="flex items-center gap-2 text-sm">
               <input
                 type="checkbox"
                 checked={selected.includes(o)}
