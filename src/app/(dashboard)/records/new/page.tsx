@@ -34,8 +34,6 @@ import {
 import { cn } from "@/lib/utils";
 import type { AppRecord, AttachmentRef, FormDefinition, FormField, RecordStatus } from "@/types";
 
-const TEXTAREA_LIMIT = 1000;
-
 function SectionCard({
   number,
   title,
@@ -469,14 +467,10 @@ export default function NewRecordPage() {
                   <Textarea
                     id={field.id}
                     value={value}
-                    onChange={(e) => updateValue(field, e.target.value.slice(0, TEXTAREA_LIMIT))}
+                    onChange={(e) => updateValue(field, e.target.value)}
                     placeholder={field.placeholder}
                     rows={5}
-                    maxLength={TEXTAREA_LIMIT}
                   />
-                  <span className="self-end text-xs text-muted-foreground">
-                    {value.length}/{TEXTAREA_LIMIT}
-                  </span>
                   {field.helpText && <p className="text-xs text-muted-foreground">{field.helpText}</p>}
                 </div>
               );

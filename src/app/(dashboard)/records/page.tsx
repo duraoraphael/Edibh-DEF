@@ -132,7 +132,7 @@ export default function RecordsHistoryPage() {
 
   useEffect(() => {
     const unsub = onSnapshot(
-      query(recordsCol(), orderBy("createdAt", "desc"), limit(1000)),
+      query(recordsCol(), orderBy("createdAt", "desc")),
       (snap) => {
         setRecords(snap.docs.map((d) => d.data()));
         setLoading(false);

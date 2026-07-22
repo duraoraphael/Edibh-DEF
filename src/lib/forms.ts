@@ -144,7 +144,7 @@ export function applyMask(value: string, mask: string): string {
 
 export async function recordNumberExists(recordNumber: string, excludeId?: string): Promise<boolean> {
   const snap = await getDocs(query(recordsCol(), where("recordNumber", "==", recordNumber)));
-  return snap.docs.some((d) => d.id !== excludeId);
+  return snap.docs.some((d) => d.id !== excludeId && !(d.data() as AppRecord).deletedAt);
 }
 
 export async function getNextRecordNumber(): Promise<string> {
