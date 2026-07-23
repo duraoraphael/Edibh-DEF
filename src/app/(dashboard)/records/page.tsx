@@ -50,6 +50,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { StatusBadge } from "@/components/ui/status-badge";
 import { EmptyState } from "@/components/ui/empty-state";
 import { FilterSelect } from "@/components/ui/filter-select";
+import { CollapsibleFilters } from "@/components/ui/collapsible-filters";
 import { SelectItem } from "@/components/ui/select";
 import { Table, TableBody, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import {
@@ -633,54 +634,62 @@ export default function RecordsHistoryPage() {
           />
         </div>
 
-        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-7">
-          <FilterSelect label="Status" value={statusFilter} onChange={resetPage(setStatusFilter)}>
-            {Object.entries(statusLabels).map(([k, v]) => (
-              <SelectItem key={k} value={k}>
-                {v}
-              </SelectItem>
-            ))}
-          </FilterSelect>
-          <FilterSelect label="Responsável" value={responsavelFilter} onChange={resetPage(setResponsavelFilter)}>
-            {responsaveis.map((v) => (
-              <SelectItem key={v} value={v}>
-                {v}
-              </SelectItem>
-            ))}
-          </FilterSelect>
-          <FilterSelect label="Gerência" value={gerenciaFilter} onChange={resetPage(setGerenciaFilter)}>
-            {gerencias.map((v) => (
-              <SelectItem key={v} value={v}>
-                {v}
-              </SelectItem>
-            ))}
-          </FilterSelect>
-          <FilterSelect label="Instalação" value={instalacaoFilter} onChange={resetPage(setInstalacaoFilter)}>
-            {instalacoes.map((v) => (
-              <SelectItem key={v} value={v}>
-                {v}
-              </SelectItem>
-            ))}
-          </FilterSelect>
-          <FilterSelect label="Sistema" value={sistemaFilter} onChange={resetPage(setSistemaFilter)}>
-            {sistemas.map((v) => (
-              <SelectItem key={v} value={v}>
-                {v}
-              </SelectItem>
-            ))}
-          </FilterSelect>
-          <FilterSelect label="Equipamento" value={equipamentoFilter} onChange={resetPage(setEquipamentoFilter)}>
-            {equipamentos.map((v) => (
-              <SelectItem key={v} value={v}>
-                {v}
-              </SelectItem>
-            ))}
-          </FilterSelect>
-          <div className="flex items-center gap-1">
-            <Input type="date" value={dateFrom} onChange={(e) => resetPage(setDateFrom)(e.target.value)} title="Período de" />
-            <Input type="date" value={dateTo} onChange={(e) => resetPage(setDateTo)(e.target.value)} title="Período até" />
+        <CollapsibleFilters
+          activeCount={
+            [statusFilter, responsavelFilter, gerenciaFilter, instalacaoFilter, sistemaFilter, equipamentoFilter].filter(
+              (v) => v !== ALL
+            ).length + (dateFrom ? 1 : 0) + (dateTo ? 1 : 0)
+          }
+        >
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-7">
+            <FilterSelect label="Status" value={statusFilter} onChange={resetPage(setStatusFilter)}>
+              {Object.entries(statusLabels).map(([k, v]) => (
+                <SelectItem key={k} value={k}>
+                  {v}
+                </SelectItem>
+              ))}
+            </FilterSelect>
+            <FilterSelect label="Responsável" value={responsavelFilter} onChange={resetPage(setResponsavelFilter)}>
+              {responsaveis.map((v) => (
+                <SelectItem key={v} value={v}>
+                  {v}
+                </SelectItem>
+              ))}
+            </FilterSelect>
+            <FilterSelect label="Gerência" value={gerenciaFilter} onChange={resetPage(setGerenciaFilter)}>
+              {gerencias.map((v) => (
+                <SelectItem key={v} value={v}>
+                  {v}
+                </SelectItem>
+              ))}
+            </FilterSelect>
+            <FilterSelect label="Instalação" value={instalacaoFilter} onChange={resetPage(setInstalacaoFilter)}>
+              {instalacoes.map((v) => (
+                <SelectItem key={v} value={v}>
+                  {v}
+                </SelectItem>
+              ))}
+            </FilterSelect>
+            <FilterSelect label="Sistema" value={sistemaFilter} onChange={resetPage(setSistemaFilter)}>
+              {sistemas.map((v) => (
+                <SelectItem key={v} value={v}>
+                  {v}
+                </SelectItem>
+              ))}
+            </FilterSelect>
+            <FilterSelect label="Equipamento" value={equipamentoFilter} onChange={resetPage(setEquipamentoFilter)}>
+              {equipamentos.map((v) => (
+                <SelectItem key={v} value={v}>
+                  {v}
+                </SelectItem>
+              ))}
+            </FilterSelect>
+            <div className="flex items-center gap-1">
+              <Input type="date" value={dateFrom} onChange={(e) => resetPage(setDateFrom)(e.target.value)} title="Período de" />
+              <Input type="date" value={dateTo} onChange={(e) => resetPage(setDateTo)(e.target.value)} title="Período até" />
+            </div>
           </div>
-        </div>
+        </CollapsibleFilters>
       </div>
 
       <div className="overflow-x-auto rounded-xl border border-border bg-card">
