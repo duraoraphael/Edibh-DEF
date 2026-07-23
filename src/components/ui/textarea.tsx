@@ -24,7 +24,7 @@ const Textarea = React.forwardRef<HTMLTextAreaElement, React.TextareaHTMLAttribu
       const textarea = event.currentTarget;
       textarea.style.height = "auto";
       textarea.style.height = `${textarea.scrollHeight}px`;
-      onInput?.(event);
+      onInput?.(event as never);
     }
 
     return (
