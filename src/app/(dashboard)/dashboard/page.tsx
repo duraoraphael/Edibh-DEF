@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import Link from "next/link";
 import { deleteDoc, doc, onSnapshot, orderBy, query, setDoc } from "firebase/firestore";
 import { motion } from "framer-motion";
 import { toast } from "sonner";
@@ -12,6 +13,7 @@ import {
   Loader2,
   Settings2,
   Trash2,
+  Plus,
 } from "lucide-react";
 import {
   Bar,
@@ -34,6 +36,7 @@ import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { EmptyState } from "@/components/ui/empty-state";
 import { FilterSelect } from "@/components/ui/filter-select";
+import { CollapsibleFilters } from "@/components/ui/collapsible-filters";
 import {
   Dialog,
   DialogContent,
@@ -273,6 +276,17 @@ export default function DashboardPage() {
     }
   }
 
+  const activeFilterCount = [
+    gerenciaFilter,
+    instalacaoFilter,
+    sistemaFilter,
+    equipamentoFilter,
+    responsavelFilter,
+    statusFilter,
+    anoFilter,
+    mesFilter,
+  ].filter((v) => v !== ALL).length + (dateFrom ? 1 : 0) + (dateTo ? 1 : 0);
+
   return (
     <div className="flex flex-col gap-6">
       <div className="flex flex-col justify-between gap-3 sm:flex-row sm:items-center">
@@ -280,57 +294,67 @@ export default function DashboardPage() {
           <h1 className="text-2xl font-semibold tracking-tight">Dashboard</h1>
           <p className="text-sm text-muted-foreground">Visão geral do Fluxo de Equipamentos</p>
         </div>
-        {isAdmin && (
-          <Button variant="outline" onClick={() => setConfigOpen(true)}>
-            <Settings2 className="h-4 w-4" />
-            Personalizar
+        <div className="flex items-center gap-2">
+          {isAdmin && (
+            <Button variant="outline" onClick={() => setConfigOpen(true)}>
+              <Settings2 className="h-4 w-4" />
+              Personalizar
+            </Button>
+          )}
+          <Button asChild>
+            <Link href="/records/new">
+              <Plus className="h-4 w-4" />
+              Novo Registro
+            </Link>
           </Button>
-        )}
+        </div>
       </div>
 
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-8">
-        <FilterSelect label="Gerência" value={gerenciaFilter} onChange={setGerenciaFilter} options={gerencias} />
-        <FilterSelect label="Instalação" value={instalacaoFilter} onChange={setInstalacaoFilter} options={instalacoes} />
-        <FilterSelect label="Sistema" value={sistemaFilter} onChange={setSistemaFilter} options={sistemas} />
-        <FilterSelect label="Equipamento" value={equipamentoFilter} onChange={setEquipamentoFilter} options={equipamentos} />
-        <FilterSelect label="Responsável" value={responsavelFilter} onChange={setResponsavelFilter} options={responsaveis} />
-        <FilterSelect
-          label="Status"
-          value={statusFilter}
-          onChange={setStatusFilter}
-          options={Object.keys(statusLabels)}
-          labels={statusLabels}
-        />
-        <FilterSelect label="Ano" value={anoFilter} onChange={setAnoFilter} options={anos} />
-        <FilterSelect
-          label="Mês"
-          value={mesFilter}
-          onChange={setMesFilter}
-          options={Array.from({ length: 12 }, (_, i) => String(i + 1))}
-          labels={Object.fromEntries(
-            Array.from({ length: 12 }, (_, i) => [
-              String(i + 1),
-              new Date(2000, i, 1).toLocaleDateString("pt-BR", { month: "long" }),
-            ])
-          )}
-        />
-        <Input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} title="Período de" />
-        <Input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} title="Período até" />
-      </div>
+      <CollapsibleFilters activeCount={activeFilterCount}>
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-8">
+          <FilterSelect label="Gerência" value={gerenciaFilter} onChange={setGerenciaFilter} options={gerencias} />
+          <FilterSelect label="Instalação" value={instalacaoFilter} onChange={setInstalacaoFilter} options={instalacoes} />
+          <FilterSelect label="Sistema" value={sistemaFilter} onChange={setSistemaFilter} options={sistemas} />
+          <FilterSelect label="Equipamento" value={equipamentoFilter} onChange={setEquipamentoFilter} options={equipamentos} />
+          <FilterSelect label="Responsável" value={responsavelFilter} onChange={setResponsavelFilter} options={responsaveis} />
+          <FilterSelect
+            label="Status"
+            value={statusFilter}
+            onChange={setStatusFilter}
+            options={Object.keys(statusLabels)}
+            labels={statusLabels}
+          />
+          <FilterSelect label="Ano" value={anoFilter} onChange={setAnoFilter} options={anos} />
+          <FilterSelect
+            label="Mês"
+            value={mesFilter}
+            onChange={setMesFilter}
+            options={Array.from({ length: 12 }, (_, i) => String(i + 1))}
+            labels={Object.fromEntries(
+              Array.from({ length: 12 }, (_, i) => [
+                String(i + 1),
+                new Date(2000, i, 1).toLocaleDateString("pt-BR", { month: "long" }),
+              ])
+            )}
+          />
+          <Input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} title="Período de" />
+          <Input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} title="Período até" />
+        </div>
+      </CollapsibleFilters>
 
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-5">
         {CARD_KEYS.filter((k) => prefs.cards.includes(k)).map((k, i) => {
           const meta = cardMeta[k];
           return (
             <motion.div key={k} initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.05 }}>
-              <Card>
+              <Card className="transition-shadow hover:shadow-md">
                 <CardContent className="flex items-center justify-between p-5">
                   <div>
                     <p className="text-sm text-muted-foreground">{meta.label}</p>
                     {loading ? (
                       <Skeleton className="mt-2 h-7 w-12" />
                     ) : (
-                      <p className="mt-1 text-2xl font-semibold">{stats[k]}</p>
+                      <p className="mt-1 text-2xl font-semibold tracking-tight">{stats[k]}</p>
                     )}
                   </div>
                   <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-primary-100 text-primary-700">
