@@ -7,7 +7,6 @@ import {
   collection,
   deleteDoc,
   doc,
-  limit,
   onSnapshot,
   orderBy,
   query,
@@ -23,6 +22,7 @@ import {
   ArrowDown,
   ArrowUp,
   ArrowUpDown,
+  Check,
   Copy,
   Download,
   Eye,
@@ -30,20 +30,22 @@ import {
   ListOrdered,
   MoreVertical,
   Pencil,
+  RefreshCw,
   RotateCcw,
   Search,
   Trash2,
   Upload,
+  X,
 } from "lucide-react";
 import { exportRecordsToExcel } from "@/lib/excel-export";
 import { db } from "@/lib/firebase";
 import { logsCol, recordsCol, writeAuditLog } from "@/lib/firestore-helpers";
 import { useAuth } from "@/lib/auth-context";
-import { DEFAULT_FORM_ID, fieldValue, statusLabels } from "@/lib/forms";
+import { DEFAULT_FORM_ID, fieldValue, statusLabels, statusVariant } from "@/lib/forms";
+import type { AppRecord, FormDefinition, FormField, LogEntry, RecordStatus } from "@/types";
 import { ExcelImportDialog } from "@/components/records/excel-import-dialog";
 import { RecordRow } from "@/components/records/record-row";
 import { generateRecordPdf, generateRecordsTablePdf } from "@/lib/pdf";
-import type { AppRecord, FormDefinition, FormField, LogEntry } from "@/types";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -57,8 +59,16 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import {
+  Select as SelectRoot,
+  SelectContent as SelectRootContent,
+  SelectItem as SelectRootItem,
+  SelectTrigger as SelectRootTrigger,
+  SelectValue as SelectRootValue,
+} from "@/components/ui/select";
 import {
   Dialog,
   DialogContent,
@@ -122,7 +132,16 @@ export default function RecordsHistoryPage() {
   const [flowUpdates, setFlowUpdates] = useState<FlowUpdateEntry[]>([]);
   const [newFlowUpdateText, setNewFlowUpdateText] = useState("");
   const [savingFlowUpdate, setSavingFlowUpdate] = useState(false);
+  // Flow update inline editing state
+  const [editingUpdateId, setEditingUpdateId] = useState<string | null>(null);
+  const [editingUpdateText, setEditingUpdateText] = useState("");
+  const [savingUpdateEdit, setSavingUpdateEdit] = useState(false);
+  // Status change state
+  const [statusChangeTarget, setStatusChangeTarget] = useState<AppRecord | null>(null);
+  const [newStatus, setNewStatus] = useState<RecordStatus | "">("");
+  const [changingStatus, setChangingStatus] = useState(false);
   const isAdmin = profile?.role === "admin";
+  const isAdminOrGerente = profile?.role === "admin" || profile?.role === "gerente";
 
   useEffect(() => {
     const unsub = onSnapshot(doc(db, "formFields", DEFAULT_FORM_ID), (snap) => {
@@ -210,6 +229,99 @@ export default function RecordsHistoryPage() {
       toast.error("Erro ao salvar atualização");
     } finally {
       setSavingFlowUpdate(false);
+    }
+  }
+
+  async function saveUpdateEdit(updateId: string) {
+    if (!selected) return;
+    const text = editingUpdateText.trim();
+    if (!text) {
+      toast.error("Digite o texto da atualização");
+      return;
+    }
+    setSavingUpdateEdit(true);
+    try {
+      await updateDoc(doc(db, "records", selected.id, "updates", updateId), { text });
+      await writeAuditLog(
+        { uid: user?.uid, name: profile?.name || user?.email || undefined, role: profile?.role },
+        {
+          action: "Atualização do fluxo editada",
+          recordId: selected.id,
+          recordNumber: selected.recordNumber,
+          statusBefore: selected.status,
+          statusAfter: selected.status,
+          detail: text,
+        }
+      );
+      setEditingUpdateId(null);
+      setEditingUpdateText("");
+      toast.success("Atualização salva");
+    } catch {
+      toast.error("Erro ao salvar atualização");
+    } finally {
+      setSavingUpdateEdit(false);
+    }
+  }
+
+  async function deleteFlowUpdate(updateId: string) {
+    if (!selected) return;
+    try {
+      await deleteDoc(doc(db, "records", selected.id, "updates", updateId));
+      await writeAuditLog(
+        { uid: user?.uid, name: profile?.name || user?.email || undefined, role: profile?.role },
+        {
+          action: "Atualização do fluxo excluída",
+          recordId: selected.id,
+          recordNumber: selected.recordNumber,
+          statusBefore: selected.status,
+          statusAfter: selected.status,
+        }
+      );
+      toast.success("Atualização excluída");
+    } catch {
+      toast.error("Erro ao excluir atualização");
+    }
+  }
+
+  async function changeRecordStatus() {
+    if (!statusChangeTarget || !newStatus) return;
+    setChangingStatus(true);
+    const statusBefore = statusChangeTarget.status;
+    try {
+      await updateDoc(doc(db, "records", statusChangeTarget.id), {
+        status: newStatus,
+        updatedAt: new Date().toISOString(),
+      });
+      // Keep approvals in sync when changing to a finalized status.
+      if (newStatus === "recusado" || newStatus === "concluido" || newStatus === "em_andamento") {
+        try {
+          await updateDoc(doc(db, "approvals", statusChangeTarget.id), {
+            status: newStatus,
+            reviewerId: user?.uid,
+            reviewerName: profile?.name || user?.email || undefined,
+            updatedAt: new Date().toISOString(),
+          });
+        } catch {
+          // approval doc may not exist for all records — not critical
+        }
+      }
+      await writeAuditLog(
+        { uid: user?.uid, name: profile?.name || user?.email || undefined, role: profile?.role },
+        {
+          action: "Status alterado",
+          recordId: statusChangeTarget.id,
+          recordNumber: statusChangeTarget.recordNumber,
+          statusBefore,
+          statusAfter: newStatus,
+        }
+      );
+      toast.success(`Status alterado para "${statusLabels[newStatus as RecordStatus]}"`);
+      setStatusChangeTarget(null);
+      setNewStatus("");
+    } catch {
+      toast.error("Erro ao alterar status");
+    } finally {
+      setChangingStatus(false);
     }
   }
 
@@ -484,7 +596,7 @@ export default function RecordsHistoryPage() {
         const year = r.createdAt ? new Date(r.createdAt).getFullYear() : new Date().getFullYear();
         const next = (countersByYear.get(year) || 0) + 1;
         countersByYear.set(year, next);
-        const recordNumber = `${next}/${year}`;
+        const recordNumber = `${String(next).padStart(4, "0")}/${year}`;
         if (r.recordNumber !== recordNumber) {
           batch.update(doc(db, "records", r.id), { recordNumber, updatedAt: new Date().toISOString() });
           opsInBatch += 1;
@@ -786,6 +898,12 @@ export default function RecordsHistoryPage() {
                             Editar
                           </DropdownMenuItem>
                         )}
+                        {view === "ativos" && isAdminOrGerente && (
+                          <DropdownMenuItem onClick={() => { setStatusChangeTarget(r); setNewStatus(r.status); }}>
+                            <RefreshCw className="h-4 w-4" />
+                            Alterar Status
+                          </DropdownMenuItem>
+                        )}
                         {view === "ativos" && canDuplicate() && (
                           <DropdownMenuItem onClick={() => duplicateRecord(r)}>
                             <Copy className="h-4 w-4" />
@@ -797,10 +915,13 @@ export default function RecordsHistoryPage() {
                           Baixar PDF
                         </DropdownMenuItem>
                         {view === "ativos" && canDelete() && (
-                          <DropdownMenuItem onClick={() => setDeleteTarget(r)}>
-                            <Trash2 className="h-4 w-4 text-destructive" />
-                            Excluir
-                          </DropdownMenuItem>
+                          <>
+                            <DropdownMenuSeparator />
+                            <DropdownMenuItem onClick={() => setDeleteTarget(r)}>
+                              <Trash2 className="h-4 w-4 text-destructive" />
+                              Excluir
+                            </DropdownMenuItem>
+                          </>
                         )}
                         {view === "removidos" && canDelete() && (
                           <DropdownMenuItem onClick={() => restoreRecord(r)}>
@@ -841,7 +962,7 @@ export default function RecordsHistoryPage() {
         </div>
       )}
 
-      <Dialog open={!!selected} onOpenChange={(o) => !o && setSelected(null)}>
+      <Dialog open={!!selected} onOpenChange={(o) => { if (!o) { setSelected(null); setEditingUpdateId(null); setEditingUpdateText(""); } }}>
         <DialogContent className="grid h-[92vh] w-[95vw] max-w-6xl grid-rows-[auto_1fr] gap-0 overflow-hidden p-0">
           {selected && (
             <>
@@ -921,11 +1042,52 @@ export default function RecordsHistoryPage() {
                       <div className="flex flex-col gap-3">
                         {flowUpdates.map((u) => (
                           <div key={u.id} className="rounded-lg border border-border p-3">
-                            <div className="mb-1 flex items-center gap-2 text-xs text-muted-foreground">
-                              <span className="font-medium text-foreground">{u.authorName}</span>
-                              <span>{u.createdAt ? u.createdAt.toDate().toLocaleString("pt-BR") : "salvando..."}</span>
+                            <div className="mb-1 flex items-center justify-between gap-2 text-xs text-muted-foreground">
+                              <div className="flex items-center gap-2">
+                                <span className="font-medium text-foreground">{u.authorName}</span>
+                                <span>{u.createdAt ? u.createdAt.toDate().toLocaleString("pt-BR") : "salvando..."}</span>
+                              </div>
+                              {isAdmin && editingUpdateId !== u.id && (
+                                <div className="flex gap-1">
+                                  <button
+                                    className="text-muted-foreground hover:text-foreground"
+                                    title="Editar"
+                                    onClick={() => { setEditingUpdateId(u.id); setEditingUpdateText(u.text); }}
+                                  >
+                                    <Pencil className="h-3.5 w-3.5" />
+                                  </button>
+                                  <button
+                                    className="text-muted-foreground hover:text-destructive"
+                                    title="Excluir"
+                                    onClick={() => deleteFlowUpdate(u.id)}
+                                  >
+                                    <Trash2 className="h-3.5 w-3.5" />
+                                  </button>
+                                </div>
+                              )}
                             </div>
-                            <p className="whitespace-pre-wrap text-sm">{u.text}</p>
+                            {editingUpdateId === u.id ? (
+                              <div className="flex flex-col gap-2">
+                                <textarea
+                                  className="w-full rounded-lg border border-border bg-background p-2 text-sm"
+                                  value={editingUpdateText}
+                                  onChange={(e) => setEditingUpdateText(e.target.value)}
+                                  rows={3}
+                                />
+                                <div className="flex gap-2">
+                                  <Button size="sm" onClick={() => saveUpdateEdit(u.id)} disabled={savingUpdateEdit}>
+                                    <Check className="h-3.5 w-3.5" />
+                                    {savingUpdateEdit ? "Salvando..." : "Salvar"}
+                                  </Button>
+                                  <Button size="sm" variant="outline" onClick={() => { setEditingUpdateId(null); setEditingUpdateText(""); }}>
+                                    <X className="h-3.5 w-3.5" />
+                                    Cancelar
+                                  </Button>
+                                </div>
+                              </div>
+                            ) : (
+                              <p className="whitespace-pre-wrap text-sm">{u.text}</p>
+                            )}
                           </div>
                         ))}
                       </div>
@@ -1022,6 +1184,44 @@ export default function RecordsHistoryPage() {
             </Button>
             <Button variant="destructive" onClick={deleteSelected} disabled={bulkDeleting}>
               {bulkDeleting ? "Excluindo..." : "Excluir"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={!!statusChangeTarget} onOpenChange={(o) => !changingStatus && !o && setStatusChangeTarget(null)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Alterar Status do Fluxo</DialogTitle>
+          </DialogHeader>
+          <div className="flex flex-col gap-3">
+            <p className="text-sm text-muted-foreground">
+              Fluxo: <span className="font-medium text-foreground">{statusChangeTarget?.recordNumber || statusChangeTarget?.id}</span>
+            </p>
+            <div className="flex flex-col gap-1.5">
+              <p className="text-sm font-medium">Novo status</p>
+              <SelectRoot value={newStatus} onValueChange={(v) => setNewStatus(v as RecordStatus)}>
+                <SelectRootTrigger>
+                  <SelectRootValue placeholder="Selecione o status" />
+                </SelectRootTrigger>
+                <SelectRootContent>
+                  <SelectRootItem value="em_andamento">Em Andamento</SelectRootItem>
+                  <SelectRootItem value="concluido">Concluído</SelectRootItem>
+                  <SelectRootItem value="recusado">Recusado</SelectRootItem>
+                  <SelectRootItem value="pendente">Em análise</SelectRootItem>
+                  <SelectRootItem value="aprovado">Aprovado</SelectRootItem>
+                  <SelectRootItem value="rejeitado">Reprovado</SelectRootItem>
+                  <SelectRootItem value="reajuste">Aguardando Reajuste</SelectRootItem>
+                </SelectRootContent>
+              </SelectRoot>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setStatusChangeTarget(null)} disabled={changingStatus}>
+              Cancelar
+            </Button>
+            <Button onClick={changeRecordStatus} disabled={changingStatus || !newStatus}>
+              {changingStatus ? "Alterando..." : "Confirmar"}
             </Button>
           </DialogFooter>
         </DialogContent>

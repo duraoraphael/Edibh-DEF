@@ -18,9 +18,7 @@ export const firebaseConfig = {
 const app = getApps().length ? getApp() : initializeApp(firebaseConfig);
 
 export const auth = getAuth(app);
-export const db = initializeFirestore(app, {
-  experimentalForceLongPolling: true,
-  useFetchStreams: false,
-});
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export const db = initializeFirestore(app, { experimentalForceLongPolling: true } as any);
 export const storage = getStorage(app);
 export default app;

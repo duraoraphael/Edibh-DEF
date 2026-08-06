@@ -52,10 +52,16 @@ service cloud.firestore {
       allow read: if isSignedIn();
       allow create: if isSignedIn() && role() != 'visualizador'
         && request.resource.data.authorId == request.auth.uid;
-      allow update: if isAdminOrGerente()
+      // Admin/gerente may update any record but must not change authorId (creator is immutable).
+      // Tecnico may update their own records: can preserve current status (autosave) or
+      // transition to rascunho/pendente (submit/resubmit); authorId must never change.
+      allow update: if (isAdminOrGerente()
+            && request.resource.data.authorId == resource.data.authorId)
         || (isTecnico() && resource.data.authorId == request.auth.uid
             && request.resource.data.authorId == resource.data.authorId
-            && (request.resource.data.status == 'rascunho' || request.resource.data.status == 'pendente'));
+            && (request.resource.data.status == 'rascunho'
+                || request.resource.data.status == 'pendente'
+                || request.resource.data.status == resource.data.status));
       allow delete: if isAdmin();
 
       match /updates/{updateId} {

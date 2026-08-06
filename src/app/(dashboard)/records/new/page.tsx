@@ -110,6 +110,9 @@ export default function NewRecordPage() {
   // Histórico "Ativos" view) nor overwrite its original createdAt.
   const [existingStatus, setExistingStatus] = useState<RecordStatus | null>(null);
   const [existingCreatedAt, setExistingCreatedAt] = useState<string | null>(null);
+  // Original author — must never be overwritten on edit (requirement: creator is immutable).
+  const [existingAuthorId, setExistingAuthorId] = useState<string | null>(null);
+  const [existingAuthorName, setExistingAuthorName] = useState<string | null>(null);
   const [manualRecordNumber, setManualRecordNumber] = useState("");
   const isAdmin = profile?.role === "admin";
   const [uploadProgress, setUploadProgress] = useState<Record<string, number>>({});
@@ -158,6 +161,9 @@ export default function NewRecordPage() {
       setExistingRecordNumber(data.recordNumber);
       setExistingStatus(data.status ?? null);
       setExistingCreatedAt(data.createdAt ?? null);
+      // Preserve original author info so edits never overwrite the creator.
+      setExistingAuthorId(data.authorId ?? null);
+      setExistingAuthorName(data.authorName ?? null);
       setManualRecordNumber(data.recordNumber || "");
     });
   }, [editId]);
@@ -173,11 +179,12 @@ export default function NewRecordPage() {
       // When editing an already-submitted record, keep its current status and
       // original createdAt so an autosave never turns it back into a rascunho
       // (which would hide it from the Histórico "Ativos" list) or reset its date.
+      // Also preserve the original author — the creator must never be overwritten.
       const isEditingExisting = !!editId && !!existingStatus;
       const payload = sanitizeForFirestore({
         status: isEditingExisting ? existingStatus : ("rascunho" as const),
-        authorId: user.uid,
-        authorName: profile?.name || "Usuário",
+        authorId: isEditingExisting ? (existingAuthorId ?? user.uid) : user.uid,
+        authorName: isEditingExisting ? (existingAuthorName ?? profile?.name ?? "Usuário") : (profile?.name || "Usuário"),
         attachments: atts,
         formId: activeForm?.id || null,
         data: nextValues,
@@ -193,7 +200,7 @@ export default function NewRecordPage() {
         setSavingDraft(false);
       }
     },
-    [draftId, user, profile, activeForm, editId, existingStatus, existingCreatedAt]
+    [draftId, user, profile, activeForm, editId, existingStatus, existingCreatedAt, existingAuthorId, existingAuthorName]
   );
 
   function updateValue(field: FormField, raw: unknown) {
@@ -323,11 +330,14 @@ export default function NewRecordPage() {
         recordNumber = await getNextRecordNumber();
       }
 
+      // When editing, preserve the original author — the creator must never be overwritten.
+      const authorId = editId ? (existingAuthorId ?? user.uid) : user.uid;
+      const authorName = editId ? (existingAuthorName ?? profile?.name ?? "Usuário") : (profile?.name || "Usuário");
       const recordPayload = sanitizeForFirestore({
         recordNumber,
         status: "pendente" as const,
-        authorId: user.uid,
-        authorName: profile?.name || "Usuário",
+        authorId,
+        authorName,
         attachments,
         formId: activeForm?.id || null,
         data: values,
@@ -406,9 +416,11 @@ export default function NewRecordPage() {
   return (
     <div className="mx-auto flex max-w-3xl flex-col gap-6">
       <div>
-        <h1 className="text-2xl font-semibold tracking-tight text-foreground">Novo Fluxo de Equipamentos Críticos</h1>
+        <h1 className="text-2xl font-semibold tracking-tight text-foreground">
+          {editId ? "Editar Fluxo de Equipamentos Críticos" : "Novo Fluxo de Equipamentos Críticos"}
+        </h1>
         <p className="text-sm text-muted-foreground">
-          {activeForm ? `Formulário: ${activeForm.name}` : "Preencha as seções abaixo para criar um novo registro"}
+          {editId && existingAuthorName ? `Criado por: ${existingAuthorName}` : activeForm ? `Formulário: ${activeForm.name}` : "Preencha as seções abaixo para criar um novo registro"}
         </p>
       </div>
 

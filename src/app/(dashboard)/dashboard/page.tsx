@@ -54,7 +54,7 @@ import type { AppRecord, Approval } from "@/types";
 const COLORS = ["#0e7a4b", "#f59e0b", "#dc2626", "#6b7280", "#6cbd90"];
 const ALL = "todos";
 
-const CARD_KEYS = ["total", "pendentes", "aprovados", "rejeitados", "andamento"] as const;
+const CARD_KEYS = ["total", "pendentes", "aprovados", "rejeitados", "andamento", "recusados"] as const;
 type CardKey = (typeof CARD_KEYS)[number];
 const CHART_KEYS = ["periodo", "status", "gerencia", "instalacao", "sistema", "responsavel"] as const;
 type ChartKey = (typeof CHART_KEYS)[number];
@@ -65,6 +65,7 @@ const cardMeta: Record<CardKey, { label: string; icon: typeof FileText }> = {
   aprovados: { label: "Finalizados (Aprovados)", icon: CheckCircle2 },
   rejeitados: { label: "Rejeitados", icon: XCircle },
   andamento: { label: "Em Andamento", icon: Loader2 },
+  recusados: { label: "Fluxos Recusados", icon: XCircle },
 };
 
 const chartMeta: Record<ChartKey, string> = {
@@ -82,7 +83,7 @@ interface DashboardPrefs {
 }
 
 const DEFAULT_PREFS: DashboardPrefs = {
-  cards: [...CARD_KEYS],
+  cards: ["total", "pendentes", "aprovados", "rejeitados", "andamento", "recusados"],
   charts: ["periodo", "status", "gerencia", "responsavel"],
 };
 
@@ -205,10 +206,11 @@ export default function DashboardPage() {
   const stats = useMemo(() => {
     const total = filtered.length;
     const pendentes = filteredApprovals.filter((a) => a.status === "pendente").length;
-    const aprovados = filtered.filter((r) => r.status === "aprovado").length;
+    const aprovados = filtered.filter((r) => r.status === "aprovado" || r.status === "concluido").length;
     const rejeitados = filtered.filter((r) => r.status === "rejeitado").length;
-    const andamento = filtered.filter((r) => r.status === "pendente" || r.status === "reajuste").length;
-    return { total, pendentes, aprovados, rejeitados, andamento };
+    const andamento = filtered.filter((r) => r.status === "pendente" || r.status === "reajuste" || r.status === "em_andamento").length;
+    const recusados = filtered.filter((r) => r.status === "recusado").length;
+    return { total, pendentes, aprovados, rejeitados, andamento, recusados };
   }, [filtered, filteredApprovals]);
 
   const chartData = useMemo(() => {
@@ -342,7 +344,7 @@ export default function DashboardPage() {
         </div>
       </CollapsibleFilters>
 
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-5">
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
         {CARD_KEYS.filter((k) => prefs.cards.includes(k)).map((k, i) => {
           const meta = cardMeta[k];
           return (

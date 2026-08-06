@@ -1,7 +1,7 @@
 import * as React from "react";
 import { cn } from "@/lib/utils";
 
-const Textarea = React.forwardRef<HTMLTextAreaElement, React.TextareaHTMLAttributes<HTMLTextAreaElement>>(
+const Textarea = React.forwardRef<HTMLTextAreaElement, Omit<React.TextareaHTMLAttributes<HTMLTextAreaElement>, "onInput"> & { onInput?: (event: React.FormEvent<HTMLTextAreaElement>) => void }>(
   ({ className, style, onInput, value, ...props }, ref) => {
     const innerRef = React.useRef<HTMLTextAreaElement | null>(null);
     const setRefs = React.useCallback(

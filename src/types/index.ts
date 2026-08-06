@@ -18,7 +18,7 @@ export interface User {
   createdAt?: string;
 }
 
-export type RecordStatus = "rascunho" | "pendente" | "aprovado" | "rejeitado" | "reajuste";
+export type RecordStatus = "rascunho" | "pendente" | "aprovado" | "rejeitado" | "reajuste" | "em_andamento" | "concluido" | "recusado";
 
 export interface AttachmentRef {
   name: string;

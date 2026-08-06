@@ -9,6 +9,9 @@ export const statusLabels: Record<RecordStatus, string> = {
   aprovado: "Aprovado",
   rejeitado: "Reprovado",
   reajuste: "Aguardando Reajuste",
+  em_andamento: "Em Andamento",
+  concluido: "Concluído",
+  recusado: "Recusado",
 };
 
 export const statusVariant: Record<RecordStatus, "default" | "warning" | "success" | "destructive" | "secondary"> = {
@@ -17,6 +20,9 @@ export const statusVariant: Record<RecordStatus, "default" | "warning" | "succes
   aprovado: "success",
   rejeitado: "destructive",
   reajuste: "warning",
+  em_andamento: "warning",
+  concluido: "success",
+  recusado: "destructive",
 };
 
 export function fieldValue(r: AppRecord, key: string): string {
@@ -158,7 +164,7 @@ export async function getNextRecordNumber(): Promise<string> {
       tx.set(counterRef, { value: next, year }, { merge: true });
       return next;
     });
-    return `${String(seq).padStart(2, "0")}/${year}`;
+    return `${String(seq).padStart(4, "0")}/${year}`;
   } catch (error) {
     logFirestoreError({ fn: "getNextRecordNumber", payload: { counterPath: `settings/counter_${year}` } }, error);
     // Do not block record persistence if the shared counter is unreachable
