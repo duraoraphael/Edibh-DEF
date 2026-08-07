@@ -13,6 +13,34 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card } from "@/components/ui/card";
 
+/**
+ * Maps a Firebase Auth error code to a user-facing message. Config-level
+ * failures (bad/expired API key, disabled project, etc.) get a message that
+ * clearly points at a broken deployment — never lumped in with "wrong
+ * password", which would send whoever's debugging chasing the wrong cause.
+ * Credential errors stay deliberately generic (never confirm whether an
+ * email exists in the system).
+ */
+function loginErrorMessage(code: string | undefined): string {
+  switch (code) {
+    case "auth/too-many-requests":
+      return "Muitas tentativas. Aguarde alguns minutos e tente novamente.";
+    case "auth/invalid-api-key":
+    case "auth/api-key-not-valid":
+    case "auth/app-not-authorized":
+    case "auth/project-not-found":
+      return "Erro de configuração do sistema. Contate o administrador (chave/projeto Firebase inválido).";
+    case "auth/network-request-failed":
+      return "Falha de conexão. Verifique sua internet e tente novamente.";
+    case "auth/user-disabled":
+      return "Esta conta foi desativada. Contate o administrador.";
+    case "auth/invalid-email":
+      return "E-mail inválido.";
+    default:
+      return "Credenciais inválidas. Verifique e tente novamente.";
+  }
+}
+
 export default function LoginPage() {
   const { user, loading, signIn } = useAuth();
   const router = useRouter();
@@ -33,11 +61,13 @@ export default function LoginPage() {
       router.replace("/dashboard");
     } catch (error) {
       const code = (error as { code?: string })?.code;
-      toast.error(
-        code === "auth/too-many-requests"
-          ? "Muitas tentativas. Aguarde alguns minutos e tente novamente."
-          : "Credenciais inválidas. Verifique e tente novamente."
-      );
+      const message = (error as { message?: string })?.message;
+      // Always log the raw Firebase code/message — the toast below is
+      // intentionally generic for credential errors (so it never confirms
+      // whether an email exists), but the real cause must stay visible for
+      // debugging instead of being silently swallowed.
+      console.error("[LoginPage] signIn failed:", code, message);
+      toast.error(loginErrorMessage(code));
     } finally {
       setSubmitting(false);
     }
