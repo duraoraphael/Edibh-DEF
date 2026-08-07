@@ -7,7 +7,6 @@ import {
   collection,
   deleteDoc,
   doc,
-  limit,
   onSnapshot,
   orderBy,
   query,
@@ -23,6 +22,7 @@ import {
   ArrowDown,
   ArrowUp,
   ArrowUpDown,
+  Check,
   Copy,
   Download,
   Eye,
@@ -34,16 +34,17 @@ import {
   Search,
   Trash2,
   Upload,
+  X as XIcon,
 } from "lucide-react";
 import { exportRecordsToExcel } from "@/lib/excel-export";
 import { db } from "@/lib/firebase";
 import { logsCol, recordsCol, writeAuditLog } from "@/lib/firestore-helpers";
 import { useAuth } from "@/lib/auth-context";
-import { DEFAULT_FORM_ID, fieldValue, statusLabels } from "@/lib/forms";
+import { DEFAULT_FORM_ID, fieldValue, formatRecordNumber, statusLabels } from "@/lib/forms";
 import { ExcelImportDialog } from "@/components/records/excel-import-dialog";
 import { RecordRow } from "@/components/records/record-row";
 import { generateRecordPdf, generateRecordsTablePdf } from "@/lib/pdf";
-import type { AppRecord, FormDefinition, FormField, LogEntry } from "@/types";
+import type { AppRecord, FormDefinition, FormField, LogEntry, RecordStatus } from "@/types";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -51,7 +52,13 @@ import { StatusBadge } from "@/components/ui/status-badge";
 import { EmptyState } from "@/components/ui/empty-state";
 import { FilterSelect } from "@/components/ui/filter-select";
 import { CollapsibleFilters } from "@/components/ui/collapsible-filters";
-import { SelectItem } from "@/components/ui/select";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { Table, TableBody, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import {
   DropdownMenu,
@@ -122,7 +129,11 @@ export default function RecordsHistoryPage() {
   const [flowUpdates, setFlowUpdates] = useState<FlowUpdateEntry[]>([]);
   const [newFlowUpdateText, setNewFlowUpdateText] = useState("");
   const [savingFlowUpdate, setSavingFlowUpdate] = useState(false);
-  const isAdmin = profile?.role === "admin";
+  const [editingUpdateId, setEditingUpdateId] = useState<string | null>(null);
+  const [editingUpdateText, setEditingUpdateText] = useState("");
+  const [savingUpdateEdit, setSavingUpdateEdit] = useState(false);
+  const [deletingUpdateId, setDeletingUpdateId] = useState<string | null>(null);
+  const [updatingStatus, setUpdatingStatus] = useState(false);
 
   useEffect(() => {
     const unsub = onSnapshot(doc(db, "formFields", DEFAULT_FORM_ID), (snap) => {
@@ -162,6 +173,10 @@ export default function RecordsHistoryPage() {
   const logsLoading = !!selected && logsLoadedForId !== selected.id;
 
   useEffect(() => {
+    cancelEditFlowUpdate();
+  }, [selected]);
+
+  useEffect(() => {
     if (!selected) return;
     const unsub = onSnapshot(
       query(collection(db, "records", selected.id, "updates"), orderBy("createdAt", "desc")),
@@ -180,7 +195,7 @@ export default function RecordsHistoryPage() {
   }, [selected]);
 
   async function addFlowUpdate() {
-    if (!selected || !isAdmin) return;
+    if (!selected || !canEdit(selected)) return;
     const text = newFlowUpdateText.trim();
     if (!text) {
       toast.error("Digite o texto da atualização");
@@ -210,6 +225,112 @@ export default function RecordsHistoryPage() {
       toast.error("Erro ao salvar atualização");
     } finally {
       setSavingFlowUpdate(false);
+    }
+  }
+
+  function startEditFlowUpdate(u: FlowUpdateEntry) {
+    setEditingUpdateId(u.id);
+    setEditingUpdateText(u.text);
+  }
+
+  function cancelEditFlowUpdate() {
+    setEditingUpdateId(null);
+    setEditingUpdateText("");
+  }
+
+  async function saveEditFlowUpdate() {
+    if (!selected || !canEdit(selected) || !editingUpdateId) return;
+    const text = editingUpdateText.trim();
+    if (!text) {
+      toast.error("Digite o texto da atualização");
+      return;
+    }
+    setSavingUpdateEdit(true);
+    try {
+      await updateDoc(doc(db, "records", selected.id, "updates", editingUpdateId), { text });
+      await writeAuditLog(
+        { uid: user?.uid, name: profile?.name || user?.email || undefined, role: profile?.role },
+        {
+          action: "Atualização do fluxo editada",
+          recordId: selected.id,
+          recordNumber: selected.recordNumber,
+          statusBefore: selected.status,
+          statusAfter: selected.status,
+          detail: text,
+        }
+      );
+      toast.success("Atualização editada");
+      cancelEditFlowUpdate();
+    } catch {
+      toast.error("Erro ao editar atualização");
+    } finally {
+      setSavingUpdateEdit(false);
+    }
+  }
+
+  async function deleteFlowUpdate(u: FlowUpdateEntry) {
+    if (!selected || !canEdit(selected)) return;
+    setDeletingUpdateId(u.id);
+    try {
+      await deleteDoc(doc(db, "records", selected.id, "updates", u.id));
+      await writeAuditLog(
+        { uid: user?.uid, name: profile?.name || user?.email || undefined, role: profile?.role },
+        {
+          action: "Atualização do fluxo excluída",
+          recordId: selected.id,
+          recordNumber: selected.recordNumber,
+          statusBefore: selected.status,
+          statusAfter: selected.status,
+          detail: u.text,
+        }
+      );
+      toast.success("Atualização excluída");
+    } catch {
+      toast.error("Erro ao excluir atualização");
+    } finally {
+      setDeletingUpdateId(null);
+    }
+  }
+
+  const EDITABLE_STATUS_TARGETS: RecordStatus[] = ["pendente", "aprovado", "rejeitado"];
+
+  async function updateRecordStatus(r: AppRecord, newStatus: RecordStatus) {
+    if (newStatus === r.status) return;
+    setUpdatingStatus(true);
+    try {
+      await updateDoc(doc(db, "records", r.id), {
+        status: newStatus,
+        updatedAt: new Date().toISOString(),
+      });
+      await setDoc(
+        doc(db, "approvals", r.id),
+        {
+          recordId: r.id,
+          recordNumber: r.recordNumber,
+          authorId: r.authorId,
+          status: newStatus,
+          reviewerId: user?.uid,
+          reviewerName: profile?.name || user?.email || undefined,
+          updatedAt: new Date().toISOString(),
+        },
+        { merge: true }
+      );
+      await writeAuditLog(
+        { uid: user?.uid, name: profile?.name || user?.email || undefined, role: profile?.role },
+        {
+          action: `Status alterado para ${statusLabels[newStatus]}`,
+          recordId: r.id,
+          recordNumber: r.recordNumber,
+          statusBefore: r.status,
+          statusAfter: newStatus,
+        }
+      );
+      setSelected((prev) => (prev && prev.id === r.id ? { ...prev, status: newStatus } : prev));
+      toast.success(`Status alterado para ${statusLabels[newStatus]}`);
+    } catch {
+      toast.error("Erro ao alterar status");
+    } finally {
+      setUpdatingStatus(false);
     }
   }
 
@@ -477,14 +598,16 @@ export default function RecordsHistoryPage() {
     setRenumbering(true);
     try {
       const ordered = [...submitted].sort((a, b) => (a.createdAt || "").localeCompare(b.createdAt || ""));
-      const countersByYear = new Map<number, number>();
       let batch = writeBatch(db);
       let opsInBatch = 0;
+      // Sequence resets per calendar year (of createdAt), matching the
+      // "XXX/ANO" numbering scheme used for new flows.
+      const seqByYear = new Map<number, number>();
       for (const r of ordered) {
         const year = r.createdAt ? new Date(r.createdAt).getFullYear() : new Date().getFullYear();
-        const next = (countersByYear.get(year) || 0) + 1;
-        countersByYear.set(year, next);
-        const recordNumber = `${next}/${year}`;
+        const seq = (seqByYear.get(year) || 0) + 1;
+        seqByYear.set(year, seq);
+        const recordNumber = formatRecordNumber(seq, year);
         if (r.recordNumber !== recordNumber) {
           batch.update(doc(db, "records", r.id), { recordNumber, updatedAt: new Date().toISOString() });
           opsInBatch += 1;
@@ -497,13 +620,13 @@ export default function RecordsHistoryPage() {
       }
       if (opsInBatch > 0) await batch.commit();
 
-      for (const [year, count] of countersByYear.entries()) {
-        await setDoc(doc(db, "settings", `counter_${year}`), { value: count, year }, { merge: true });
+      for (const [year, seq] of seqByYear) {
+        await setDoc(doc(db, "settings", `recordCounter_${year}`), { value: seq, year }, { merge: true });
       }
 
       await writeAuditLog(
         { uid: user?.uid, name: profile?.name || user?.email || undefined, role: profile?.role },
-        { action: "Renumeração geral de IDs", detail: "Alteração de número do fluxo (renumeração sequencial)" }
+        { action: "Renumeração geral de IDs", detail: "Alteração de número do fluxo (renumeração sequencial por ano)" }
       );
 
       toast.success("IDs renumerados em ordem");
@@ -846,9 +969,31 @@ export default function RecordsHistoryPage() {
           {selected && (
             <>
               <DialogHeader className="border-b border-border px-6 py-4">
-                <DialogTitle className="flex items-center gap-3">
+                <DialogTitle className="flex flex-wrap items-center gap-3">
                   {selected.recordNumber || selected.id}
-                  <StatusBadge status={selected.status} />
+                  {canEdit(selected) ? (
+                    <Select
+                      value={selected.status}
+                      onValueChange={(v) => updateRecordStatus(selected, v as RecordStatus)}
+                      disabled={updatingStatus}
+                    >
+                      <SelectTrigger className="h-7 w-auto text-xs">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {EDITABLE_STATUS_TARGETS.map((s) => (
+                          <SelectItem key={s} value={s}>
+                            {statusLabels[s]}
+                          </SelectItem>
+                        ))}
+                        {selected.status === "reajuste" && (
+                          <SelectItem value="reajuste">{statusLabels.reajuste}</SelectItem>
+                        )}
+                      </SelectContent>
+                    </Select>
+                  ) : (
+                    <StatusBadge status={selected.status} />
+                  )}
                 </DialogTitle>
                 <p className="text-sm text-muted-foreground">Responsável: {selected.authorName || "—"}</p>
               </DialogHeader>
@@ -873,12 +1018,12 @@ export default function RecordsHistoryPage() {
                       <p className="text-sm text-muted-foreground">Nenhum anexo</p>
                     ) : (
                       <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
-                        {selected.attachments.map((a) => {
+                        {selected.attachments.map((a, i) => {
                           const isImage =
                             /\.(png|jpe?g|gif|webp)$/i.test(a.name) || a.contentType?.startsWith("image/");
                           return (
                             <a
-                              key={a.name}
+                              key={a.id || `${a.name}-${i}`}
                               href={a.url}
                               target="_blank"
                               rel="noreferrer"
@@ -901,7 +1046,7 @@ export default function RecordsHistoryPage() {
                   </div>
                   <div>
                     <h3 className="mb-2 text-sm font-semibold">Atualizações do Fluxo</h3>
-                    {isAdmin && (
+                    {canEdit(selected) && (
                       <div className="mb-3 flex flex-col gap-2 sm:flex-row">
                         <textarea
                           className="flex-1 rounded-lg border border-border bg-background p-2 text-sm"
@@ -921,11 +1066,53 @@ export default function RecordsHistoryPage() {
                       <div className="flex flex-col gap-3">
                         {flowUpdates.map((u) => (
                           <div key={u.id} className="rounded-lg border border-border p-3">
-                            <div className="mb-1 flex items-center gap-2 text-xs text-muted-foreground">
-                              <span className="font-medium text-foreground">{u.authorName}</span>
-                              <span>{u.createdAt ? u.createdAt.toDate().toLocaleString("pt-BR") : "salvando..."}</span>
+                            <div className="mb-1 flex items-center justify-between gap-2">
+                              <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                                <span className="font-medium text-foreground">{u.authorName}</span>
+                                <span>{u.createdAt ? u.createdAt.toDate().toLocaleString("pt-BR") : "salvando..."}</span>
+                              </div>
+                              {canEdit(selected) && editingUpdateId !== u.id && (
+                                <div className="flex items-center gap-1">
+                                  <button
+                                    className="text-muted-foreground hover:text-foreground"
+                                    aria-label="Editar atualização"
+                                    onClick={() => startEditFlowUpdate(u)}
+                                  >
+                                    <Pencil className="h-3.5 w-3.5" />
+                                  </button>
+                                  <button
+                                    className="text-muted-foreground hover:text-destructive"
+                                    aria-label="Excluir atualização"
+                                    disabled={deletingUpdateId === u.id}
+                                    onClick={() => deleteFlowUpdate(u)}
+                                  >
+                                    <Trash2 className="h-3.5 w-3.5" />
+                                  </button>
+                                </div>
+                              )}
                             </div>
-                            <p className="whitespace-pre-wrap text-sm">{u.text}</p>
+                            {editingUpdateId === u.id ? (
+                              <div className="flex flex-col gap-2">
+                                <textarea
+                                  className="rounded-lg border border-border bg-background p-2 text-sm"
+                                  value={editingUpdateText}
+                                  onChange={(e) => setEditingUpdateText(e.target.value)}
+                                  rows={2}
+                                />
+                                <div className="flex gap-2">
+                                  <Button size="sm" onClick={saveEditFlowUpdate} disabled={savingUpdateEdit}>
+                                    <Check className="h-3.5 w-3.5" />
+                                    Salvar
+                                  </Button>
+                                  <Button size="sm" variant="outline" onClick={cancelEditFlowUpdate}>
+                                    <XIcon className="h-3.5 w-3.5" />
+                                    Cancelar
+                                  </Button>
+                                </div>
+                              </div>
+                            ) : (
+                              <p className="whitespace-pre-wrap text-sm">{u.text}</p>
+                            )}
                           </div>
                         ))}
                       </div>
@@ -1034,7 +1221,7 @@ export default function RecordsHistoryPage() {
           </DialogHeader>
           <p className="text-sm text-muted-foreground">
             Isso vai reordenar todos os {submitted.length} registro(s) submetidos por data de criação e renumerar
-            sequencialmente (1/ano, 2/ano...), sem pular ou repetir números. Esta ação não pode ser desfeita.
+            sequencialmente (0001, 0002...), sem pular ou repetir números. Esta ação não pode ser desfeita.
           </p>
           <DialogFooter>
             <Button variant="outline" onClick={() => setRenumberOpen(false)} disabled={renumbering}>

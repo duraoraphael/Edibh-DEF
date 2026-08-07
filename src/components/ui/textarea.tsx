@@ -20,7 +20,7 @@ const Textarea = React.forwardRef<HTMLTextAreaElement, React.TextareaHTMLAttribu
       textarea.style.height = `${textarea.scrollHeight}px`;
     }, [value]);
 
-    function handleInput(event: React.FormEvent<HTMLTextAreaElement>) {
+    function handleInput(event: React.InputEvent<HTMLTextAreaElement>) {
       const textarea = event.currentTarget;
       textarea.style.height = "auto";
       textarea.style.height = `${textarea.scrollHeight}px`;

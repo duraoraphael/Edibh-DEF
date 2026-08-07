@@ -7,7 +7,7 @@ import { toast } from "sonner";
 import { Upload, Loader2, AlertTriangle, CheckCircle2, FileSpreadsheet, X, Trash2 } from "lucide-react";
 import { db } from "@/lib/firebase";
 import { recordsCol } from "@/lib/firestore-helpers";
-import { getNextRecordNumber } from "@/lib/forms";
+import { reserveSequentialNumbers } from "@/lib/forms";
 import type { AppRecord, RecordStatus } from "@/types";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
@@ -196,16 +196,32 @@ export function ExcelImportDialog({
   async function runImport() {
     if (!canImport) return;
     setImporting(true);
-    let imported = 0;
     let ignored = 0;
     const errors: string[] = [];
     const seenIds = new Set<string>();
     const importedIds: string[] = [];
     const batchId = crypto.randomUUID();
     try {
+      // Decide which rows will actually be imported first (skipping
+      // duplicate ids), then reserve exactly that many sequential numbers in
+      // one shot — a single counter read-modify-write instead of one
+      // transaction per row.
+      const validRows = rows.filter((row) => {
+        const id = cellValue(row, mapping.id);
+        if (id && seenIds.has(id)) {
+          ignored += 1;
+          errors.push(`Linha ${row.index + 2}: ID duplicado (${id})`);
+          return false;
+        }
+        if (id) seenIds.add(id);
+        return true;
+      });
+      const recordNumbers = await reserveSequentialNumbers(validRows.length);
+
       let batch = writeBatch(db);
       let opsInBatch = 0;
-      for (const row of rows) {
+      for (let i = 0; i < validRows.length; i += 1) {
+        const row = validRows[i];
         const id = cellValue(row, mapping.id);
         const instalacao = cellValue(row, mapping.instalacao);
         const sistema = cellValue(row, mapping.sistema);
@@ -213,17 +229,9 @@ export function ExcelImportDialog({
         const gerencia = cellValue(row, mapping.gerencia);
         const responsavel = cellValue(row, mapping.responsavel);
 
-        if (id && seenIds.has(id)) {
-          ignored += 1;
-          errors.push(`Linha ${row.index + 2}: ID duplicado (${id})`);
-          continue;
-        }
-        if (id) seenIds.add(id);
-
         const newId = crypto.randomUUID();
-        const recordNumber = await getNextRecordNumber();
         const record: Omit<AppRecord, "id"> = {
-          recordNumber,
+          recordNumber: recordNumbers[i],
           status: "aprovado" as RecordStatus,
           authorId: authorId || "import",
           authorName: responsavel,
@@ -241,7 +249,6 @@ export function ExcelImportDialog({
         };
         batch.set(doc(recordsCol(), newId), record as AppRecord);
         opsInBatch += 1;
-        imported += 1;
         importedIds.push(newId);
 
         if (opsInBatch >= 400) {
@@ -252,9 +259,9 @@ export function ExcelImportDialog({
       }
       if (opsInBatch > 0) await batch.commit();
 
-      setResult({ imported, ignored, errors, batchId, importedIds });
-      if (imported > 0) {
-        toast.success(`${imported} registro(s) importado(s)`);
+      setResult({ imported: importedIds.length, ignored, errors, batchId, importedIds });
+      if (importedIds.length > 0) {
+        toast.success(`${importedIds.length} registro(s) importado(s)`);
         onImported();
       }
       if (ignored > 0) toast.message(`${ignored} linha(s) ignorada(s)`);

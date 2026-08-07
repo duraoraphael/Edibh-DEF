@@ -571,7 +571,7 @@ function OptionsInput({
 }) {
   // Local editable copy so typing stays responsive; committed to the parent
   // (and Firestore, debounced) on every structural change and on blur.
-  const externalKey = options.join(" ");
+  const externalKey = options.join(" ");
   const [items, setItems] = useState<string[]>(options);
   const [dragIndex, setDragIndex] = useState<number | null>(null);
   const [editing, setEditing] = useState(false);
@@ -581,7 +581,7 @@ function OptionsInput({
   const canCollapse = items.length > COLLAPSE_LIMIT;
 
   // Re-sync with external options when they change and the user isn't editing.
-  if (!editing && items.join(" ") !== externalKey) {
+  if (!editing && items.join(" ") !== externalKey) {
     setItems(options);
   }
 

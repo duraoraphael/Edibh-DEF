@@ -1,12 +1,12 @@
-import { doc, getDocs, query, runTransaction, where } from "firebase/firestore";
+import { doc, getDoc, getDocs, query, runTransaction, where } from "firebase/firestore";
 import { db } from "./firebase";
 import { recordsCol } from "./firestore-helpers";
 import type { AppRecord, FormField, FormFieldType, RecordStatus, UserRole } from "@/types";
 
 export const statusLabels: Record<RecordStatus, string> = {
   rascunho: "Rascunho",
-  pendente: "Em análise",
-  aprovado: "Aprovado",
+  pendente: "Em Análise",
+  aprovado: "Em Andamento",
   rejeitado: "Reprovado",
   reajuste: "Aguardando Reajuste",
 };
@@ -147,23 +147,161 @@ export async function recordNumberExists(recordNumber: string, excludeId?: strin
   return snap.docs.some((d) => d.id !== excludeId && !(d.data() as AppRecord).deletedAt);
 }
 
+/** Per-year counter doc id, e.g. "recordCounter_2026". Resets naturally each year. */
+function recordCounterId(year: number): string {
+  return `recordCounter_${year}`;
+}
+
+function recordCounterRef(year: number) {
+  return doc(db, "settings", recordCounterId(year));
+}
+
+/** Format: zero-padded 3-digit sequence + "/" + year, e.g. "001/2026", "130/2026". */
+export function formatRecordNumber(seq: number, year: number): string {
+  return `${String(seq).padStart(3, "0")}/${year}`;
+}
+
+/** Matches both the current "NNN/YYYY" format and the legacy bare "NNNN" format. */
+const RECORD_NUMBER_PATTERN = /^(\d+)(?:\/(\d{4}))?$/;
+
+/**
+ * Scans existing records to find the highest sequence number already used
+ * for `year`. Legacy records (created before the "NNN/YYYY" format existed)
+ * have no year suffix, so their year is inferred from `createdAt`. Used only
+ * to seed a year's counter the first time it's needed, so numbering
+ * continues from wherever it left off instead of restarting at 1.
+ */
+async function findHighestExistingSequence(year: number): Promise<number> {
+  const snap = await getDocs(recordsCol());
+  let max = 0;
+  for (const docSnap of snap.docs) {
+    const r = docSnap.data() as AppRecord;
+    const raw = r.recordNumber?.trim();
+    if (!raw) continue;
+    const m = RECORD_NUMBER_PATTERN.exec(raw);
+    if (!m) continue;
+    const seq = parseInt(m[1], 10);
+    if (Number.isNaN(seq)) continue;
+    const recYear = m[2] ? parseInt(m[2], 10) : r.createdAt ? new Date(r.createdAt).getFullYear() : year;
+    if (recYear === year && seq > max) max = seq;
+  }
+  return max;
+}
+
+/**
+ * Ensures `settings/recordCounter_{year}` exists before it's incremented.
+ * Seeds it (once) from the highest sequence number already in use for that
+ * year, so the first flow of a year continues the existing sequence rather
+ * than restarting at 1. Safe under concurrency: the seed itself is only
+ * committed inside a transaction that re-checks existence, so a race between
+ * two first-callers converges on the same seed instead of overwriting a
+ * counter that has already advanced.
+ */
+async function ensureCounterSeeded(year: number): Promise<void> {
+  const counterRef = recordCounterRef(year);
+  const existing = await getDoc(counterRef);
+  if (existing.exists()) return;
+  const seed = await findHighestExistingSequence(year);
+  await runTransaction(db, async (tx) => {
+    const snap = await tx.get(counterRef);
+    if (!snap.exists()) tx.set(counterRef, { value: seed, year });
+  });
+}
+
+/**
+ * Next sequential flow number for the current year ("NNN/YYYY"). Uses a
+ * Firestore transaction on a per-year counter doc so concurrent submissions
+ * from different users never collide or skip — the transaction retries
+ * automatically on contention. No fallback: if the counter write fails, the
+ * caller must surface the error rather than silently minting a
+ * non-sequential/non-unique number.
+ */
 export async function getNextRecordNumber(): Promise<string> {
   const year = new Date().getFullYear();
-  const counterRef = doc(db, "settings", `counter_${year}`);
-  try {
-    const seq = await runTransaction(db, async (tx) => {
-      const snap = await tx.get(counterRef);
-      const current = snap.exists() ? (snap.data().value as number) : 0;
-      const next = current + 1;
-      tx.set(counterRef, { value: next, year }, { merge: true });
-      return next;
-    });
-    return `${String(seq).padStart(2, "0")}/${year}`;
-  } catch (error) {
-    logFirestoreError({ fn: "getNextRecordNumber", payload: { counterPath: `settings/counter_${year}` } }, error);
-    // Do not block record persistence if the shared counter is unreachable
-    // (e.g. permission issue on the "settings" collection). Fall back to a
-    // timestamp-based number so the record is still saved.
-    return `${Date.now()}/${year}`;
-  }
+  await ensureCounterSeeded(year);
+  const counterRef = recordCounterRef(year);
+  const seq = await runTransaction(db, async (tx) => {
+    const snap = await tx.get(counterRef);
+    const current = snap.exists() ? (snap.data().value as number) : 0;
+    const next = current + 1;
+    tx.set(counterRef, { value: next, year }, { merge: true });
+    return next;
+  });
+  return formatRecordNumber(seq, year);
+}
+
+/**
+ * Reserves `count` consecutive numbers in ONE transaction (a single
+ * counter read-modify-write instead of one transaction per row). Used by
+ * bulk import, where rows are later persisted via a batched write: this
+ * keeps the reservation itself atomic/gap-free under concurrency, though a
+ * batch failure after reservation still forfeits that block — acceptable
+ * for a rare, admin-only bulk operation, unlike the single-flow submission
+ * path above which guarantees full record+number atomicity.
+ */
+export async function reserveSequentialNumbers(count: number): Promise<string[]> {
+  if (count <= 0) return [];
+  const year = new Date().getFullYear();
+  await ensureCounterSeeded(year);
+  const counterRef = recordCounterRef(year);
+  const start = await runTransaction(db, async (tx) => {
+    const snap = await tx.get(counterRef);
+    const current = snap.exists() ? (snap.data().value as number) : 0;
+    tx.set(counterRef, { value: current + count, year }, { merge: true });
+    return current + 1;
+  });
+  return Array.from({ length: count }, (_, i) => formatRecordNumber(start + i, year));
+}
+
+/**
+ * Atomically allocates the next sequential number AND persists the record +
+ * its approval doc in the same Firestore transaction. This is the only path
+ * allowed to consume a number: if the record/approval write is rejected for
+ * any reason, the whole transaction (including the counter increment) is
+ * rolled back, so no number is ever wasted and no half-created record is
+ * left behind (previously, the number was consumed by a separate call before
+ * the record write, so a failed write silently burned a number and left an
+ * invisible orphaned draft).
+ */
+export async function createRecordWithSequentialNumber(
+  draftId: string,
+  buildRecordPayload: (recordNumber: string) => Record<string, unknown>,
+  buildApprovalPayload: (recordNumber: string) => Record<string, unknown>
+): Promise<string> {
+  const year = new Date().getFullYear();
+  await ensureCounterSeeded(year);
+  const counterRef = recordCounterRef(year);
+  const recordRef = doc(db, "records", draftId);
+  const approvalRef = doc(db, "approvals", draftId);
+  return runTransaction(db, async (tx) => {
+    const snap = await tx.get(counterRef);
+    const current = snap.exists() ? (snap.data().value as number) : 0;
+    const next = current + 1;
+    const recordNumber = formatRecordNumber(next, year);
+    tx.set(counterRef, { value: next, year }, { merge: true });
+    tx.set(recordRef, sanitizeForFirestore(buildRecordPayload(recordNumber)), { merge: true });
+    tx.set(approvalRef, sanitizeForFirestore(buildApprovalPayload(recordNumber)));
+    return recordNumber;
+  });
+}
+
+/**
+ * Atomically persists the record + its approval doc for a flow that already
+ * has a fixed number (admin manual entry, or a resubmission after
+ * "Aguardando Reajuste" that keeps its original number). Doesn't touch the
+ * sequential counter, so it carries no number-waste risk, but still keeps
+ * the record and its approval in sync as a single all-or-nothing write.
+ */
+export async function saveRecordWithFixedNumber(
+  draftId: string,
+  recordNumber: string,
+  buildRecordPayload: (recordNumber: string) => Record<string, unknown>,
+  buildApprovalPayload: (recordNumber: string) => Record<string, unknown>
+): Promise<void> {
+  const recordRef = doc(db, "records", draftId);
+  const approvalRef = doc(db, "approvals", draftId);
+  await runTransaction(db, async (tx) => {
+    tx.set(recordRef, sanitizeForFirestore(buildRecordPayload(recordNumber)), { merge: true });
+    tx.set(approvalRef, sanitizeForFirestore(buildApprovalPayload(recordNumber)));
+  });
 }

@@ -52,23 +52,34 @@ service cloud.firestore {
       allow read: if isSignedIn();
       allow create: if isSignedIn() && role() != 'visualizador'
         && request.resource.data.authorId == request.auth.uid;
-      allow update: if isAdminOrGerente()
-        || (isTecnico() && resource.data.authorId == request.auth.uid
-            && request.resource.data.authorId == resource.data.authorId
-            && (request.resource.data.status == 'rascunho' || request.resource.data.status == 'pendente'));
+      allow update: if (isAdminOrGerente()
+          || (isTecnico() && resource.data.authorId == request.auth.uid))
+        && request.resource.data.authorId == resource.data.authorId;
       allow delete: if isAdmin();
 
       match /updates/{updateId} {
+        function ownsParentRecord() {
+          return isTecnico()
+            && get(/databases/$(database)/documents/records/$(recordId)).data.authorId == request.auth.uid;
+        }
         allow read: if isSignedIn();
-        allow create: if isAdmin();
-        allow update, delete: if isAdmin();
+        allow create, update, delete: if isAdminOrGerente() || ownsParentRecord();
       }
     }
 
-    // approvals: only admin/gerente act on approvals; everyone signed in reads.
+    // approvals: doc id == record id, and every approval doc carries its own
+    // `authorId` (denormalized from the parent record) so this check never
+    // needs get() on another document — safe even when the approval and its
+    // parent record are written in the same atomic transaction, where a
+    // get() could race against the record's own pending write. Admin/gerente
+    // always act on approvals; a tecnico may create/update the approval for
+    // a record they authored (needed so their own submission and their own
+    // status changes succeed).
     match /approvals/{approvalId} {
       allow read: if isSignedIn();
-      allow write: if isAdminOrGerente();
+      allow create, update: if isAdminOrGerente()
+        || (isSignedIn() && role() != 'visualizador' && request.resource.data.authorId == request.auth.uid);
+      allow delete: if isAdmin();
     }
 
     // form definitions: admin/gerente manage fields; everyone reads (needed
@@ -106,10 +117,15 @@ service cloud.firestore {
       allow delete: if false;
     }
 
-    // shared sequence counters used to generate record numbers.
+    // shared, per-year sequence counters used to generate record numbers
+    // ("recordCounter_2026", "recordCounter_2027", ...). Any signed-in
+    // non-visualizador user may advance a record counter (needed so a
+    // tecnico's own submission can atomically claim the next sequential
+    // number); every other setting stays admin/gerente-only.
     match /settings/{settingId} {
       allow read: if isSignedIn();
-      allow write: if isAdminOrGerente();
+      allow write: if isAdminOrGerente()
+        || (settingId.matches('recordCounter(_[0-9]{4})?') && isSignedIn() && role() != 'visualizador');
     }
   }
 }

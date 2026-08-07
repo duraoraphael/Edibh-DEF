@@ -323,9 +323,9 @@ export default function ApprovalsPage() {
                         <div>
                           <p className="mb-2 text-xs font-semibold uppercase text-muted-foreground">Anexos</p>
                           <div className="flex flex-wrap gap-2">
-                            {rec.attachments.map((att) => (
+                            {rec.attachments.map((att, i) => (
                               <a
-                                key={att.name}
+                                key={att.id || `${att.name}-${i}`}
                                 href={att.url}
                                 target="_blank"
                                 rel="noreferrer"

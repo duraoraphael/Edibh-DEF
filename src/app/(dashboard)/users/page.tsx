@@ -119,7 +119,7 @@ export default function UsersPage() {
         </Select>
       </div>
 
-      <div className="rounded-2xl border border-border bg-card">
+      <div className="overflow-x-auto rounded-2xl border border-border bg-card">
         {loading ? (
           <div className="flex flex-col gap-2 p-4">
             {Array.from({ length: 5 }).map((_, i) => (

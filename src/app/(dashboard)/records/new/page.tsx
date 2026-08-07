@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { doc, getDoc, onSnapshot, serverTimestamp, setDoc } from "firebase/firestore";
+import { doc, getDoc, onSnapshot, setDoc } from "firebase/firestore";
 import { getDownloadURL, ref, uploadBytesResumable } from "firebase/storage";
 import { toast } from "sonner";
 import { Loader2, Paperclip, UploadCloud, X } from "lucide-react";
@@ -11,9 +11,10 @@ import { useAuth } from "@/lib/auth-context";
 import {
   DEFAULT_FORM_ID,
   applyMask,
-  getNextRecordNumber,
+  createRecordWithSequentialNumber,
   logFirestoreError,
   recordNumberExists,
+  saveRecordWithFixedNumber,
   sanitizeForFirestore,
 } from "@/lib/forms";
 import { createNotifications, getUserIdsByRoles, writeAuditLog } from "@/lib/firestore-helpers";
@@ -63,6 +64,11 @@ function defaultValueFor(field: FormField): unknown {
   return "";
 }
 
+/** Backfills `id` on attachments saved before it existed, so keys/removal stay unique even for same-named files. */
+function withAttachmentIds(list: AttachmentRef[]): AttachmentRef[] {
+  return list.map((a) => (a.id ? a : { ...a, id: crypto.randomUUID() }));
+}
+
 export default function NewRecordPage() {
   const { user, profile } = useAuth();
   const router = useRouter();
@@ -99,7 +105,7 @@ export default function NewRecordPage() {
     const raw = window.localStorage.getItem(`edibh_draft_${draftId}`);
     if (!raw) return [];
     try {
-      return JSON.parse(raw).attachments ?? [];
+      return withAttachmentIds(JSON.parse(raw).attachments ?? []);
     } catch {
       return [];
     }
@@ -110,9 +116,17 @@ export default function NewRecordPage() {
   // Histórico "Ativos" view) nor overwrite its original createdAt.
   const [existingStatus, setExistingStatus] = useState<RecordStatus | null>(null);
   const [existingCreatedAt, setExistingCreatedAt] = useState<string | null>(null);
+  // The original creator is immutable once a record exists in Firestore: it
+  // is only ever set on first creation, never reassigned to whoever is
+  // currently editing (admin/gerente included).
+  const [existingAuthorId, setExistingAuthorId] = useState<string | null>(null);
+  const [existingAuthorName, setExistingAuthorName] = useState<string | null>(null);
   const [manualRecordNumber, setManualRecordNumber] = useState("");
   const isAdmin = profile?.role === "admin";
   const [uploadProgress, setUploadProgress] = useState<Record<string, number>>({});
+  // Display label for each in-flight generic upload, keyed by the same id as
+  // uploadProgress (not by filename, since two files can share a name).
+  const [uploadFileNames, setUploadFileNames] = useState<Record<string, string>>({});
   const [dragActive, setDragActive] = useState(false);
   const [savingDraft, setSavingDraft] = useState(false);
   const [savedAt, setSavedAt] = useState<Date | null>(null);
@@ -149,18 +163,26 @@ export default function NewRecordPage() {
   }, []);
 
   useEffect(() => {
-    if (!editId) return;
-    getDoc(doc(db, "records", editId)).then((snap) => {
+    // Always check whether this draft/record already exists in Firestore, so
+    // the original creator is picked up even when resuming a locally-saved
+    // draft (editId unset but the doc already has an authorId). Field/attachment
+    // values are only restored from Firestore when explicitly editing (?id=),
+    // otherwise the locally-saved draft state (set at useState init) wins.
+    getDoc(doc(db, "records", draftId)).then((snap) => {
       if (!snap.exists()) return;
       const data = snap.data() as AppRecord;
-      setValues(data.data || {});
-      setAttachments(data.attachments || []);
+      if (editId) {
+        setValues(data.data || {});
+        setAttachments(withAttachmentIds(data.attachments || []));
+      }
       setExistingRecordNumber(data.recordNumber);
       setExistingStatus(data.status ?? null);
       setExistingCreatedAt(data.createdAt ?? null);
+      setExistingAuthorId(data.authorId ?? null);
+      setExistingAuthorName(data.authorName ?? null);
       setManualRecordNumber(data.recordNumber || "");
     });
-  }, [editId]);
+  }, [draftId, editId]);
 
   const persistDraft = useCallback(
     async (nextValues: Record<string, unknown>, atts: AttachmentRef[]) => {
@@ -176,8 +198,8 @@ export default function NewRecordPage() {
       const isEditingExisting = !!editId && !!existingStatus;
       const payload = sanitizeForFirestore({
         status: isEditingExisting ? existingStatus : ("rascunho" as const),
-        authorId: user.uid,
-        authorName: profile?.name || "Usuário",
+        authorId: existingAuthorId ?? user.uid,
+        authorName: existingAuthorName ?? profile?.name ?? "Usuário",
         attachments: atts,
         formId: activeForm?.id || null,
         data: nextValues,
@@ -193,7 +215,7 @@ export default function NewRecordPage() {
         setSavingDraft(false);
       }
     },
-    [draftId, user, profile, activeForm, editId, existingStatus, existingCreatedAt]
+    [draftId, user, profile, activeForm, editId, existingStatus, existingCreatedAt, existingAuthorId, existingAuthorName]
   );
 
   function updateValue(field: FormField, raw: unknown) {
@@ -238,28 +260,49 @@ export default function NewRecordPage() {
     if (!files || !user) return;
     const list = Array.from(files);
     for (const file of list) {
-      const path = `attachments/${user.uid}/${draftId}/${Date.now()}_${file.name}`;
+      // A per-upload id (not the filename) tracks progress and identifies the
+      // resulting attachment — two files can share a name (e.g. "IMG_001.jpg"
+      // from a phone camera), which previously caused duplicate React keys
+      // and made removing one attachment remove every same-named one.
+      const id = crypto.randomUUID();
+      const path = `attachments/${user.uid}/${draftId}/${id}_${file.name}`;
       const storageRef = ref(storage, path);
       const task = uploadBytesResumable(storageRef, file);
+      setUploadFileNames((p) => ({ ...p, [id]: file.name }));
       task.on(
         "state_changed",
         (snap) => {
           const pct = Math.round((snap.bytesTransferred / snap.totalBytes) * 100);
-          setUploadProgress((p) => ({ ...p, [file.name]: pct }));
+          setUploadProgress((p) => ({ ...p, [id]: pct }));
         },
         () => {
           toast.error(`Falha ao enviar ${file.name}`);
+          setUploadProgress((p) => {
+            const rest = { ...p };
+            delete rest[id];
+            return rest;
+          });
+          setUploadFileNames((p) => {
+            const rest = { ...p };
+            delete rest[id];
+            return rest;
+          });
         },
         async () => {
           const url = await getDownloadURL(storageRef);
           setAttachments((prev) => {
-            const next = [...prev, { name: file.name, url, size: file.size, contentType: file.type }];
+            const next = [...prev, { id, name: file.name, url, size: file.size, contentType: file.type }];
             persistDraft(values, next);
             return next;
           });
           setUploadProgress((p) => {
             const rest = { ...p };
-            delete rest[file.name];
+            delete rest[id];
+            return rest;
+          });
+          setUploadFileNames((p) => {
+            const rest = { ...p };
+            delete rest[id];
             return rest;
           });
         }
@@ -267,9 +310,9 @@ export default function NewRecordPage() {
     }
   }
 
-  function removeAttachment(name: string) {
+  function removeAttachment(id: string) {
     setAttachments((prev) => {
-      const next = prev.filter((a) => a.name !== name);
+      const next = prev.filter((a) => a.id !== id);
       persistDraft(values, next);
       return next;
     });
@@ -309,9 +352,35 @@ export default function NewRecordPage() {
       return;
     }
     setSubmitting(true);
-    let recordNumber = existingRecordNumber;
     try {
       const typed = manualRecordNumber.trim();
+      const authorId = existingAuthorId ?? user.uid;
+      const authorName = existingAuthorName ?? profile?.name ?? "Usuário";
+      const buildRecordPayload = (recordNumber: string) => ({
+        recordNumber,
+        status: "pendente" as const,
+        authorId,
+        authorName,
+        attachments,
+        formId: activeForm?.id || null,
+        data: values,
+        updatedAt: new Date().toISOString(),
+        createdAt: existingCreatedAt ?? new Date().toISOString(),
+      });
+      const buildApprovalPayload = (recordNumber: string) => ({
+        recordId: draftId,
+        recordNumber,
+        authorId,
+        status: "pendente" as const,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      });
+
+      // Assigning a sequential number and persisting the record + its
+      // approval doc happens in ONE atomic transaction (see forms.ts): if
+      // the write is rejected for any reason, the number is never consumed
+      // and nothing is left half-created.
+      let recordNumber: string;
       if (isAdmin && typed) {
         if (typed !== existingRecordNumber && (await recordNumberExists(typed, draftId))) {
           toast.error(`O número de fluxo "${typed}" já está em uso. Informe outro número.`);
@@ -319,42 +388,12 @@ export default function NewRecordPage() {
           return;
         }
         recordNumber = typed;
-      } else if (!recordNumber) {
-        recordNumber = await getNextRecordNumber();
-      }
-
-      const recordPayload = sanitizeForFirestore({
-        recordNumber,
-        status: "pendente" as const,
-        authorId: user.uid,
-        authorName: profile?.name || "Usuário",
-        attachments,
-        formId: activeForm?.id || null,
-        data: values,
-        updatedAt: new Date().toISOString(),
-        createdAt: existingCreatedAt ?? new Date().toISOString(),
-      });
-      try {
-        await setDoc(doc(db, "records", draftId), recordPayload, { merge: true });
-      } catch (error) {
-        logFirestoreError({ fn: "handleSubmit:setDoc(records)", payload: recordPayload }, error);
-        toast.error("Falha ao salvar o registro. Veja o console para detalhes.");
-        return;
-      }
-
-      const approvalPayload = sanitizeForFirestore({
-        recordId: draftId,
-        recordNumber,
-        status: "pendente" as const,
-        createdAt: new Date().toISOString(),
-        updatedAt: serverTimestamp(),
-      });
-      try {
-        await setDoc(doc(db, "approvals", draftId), approvalPayload);
-      } catch (error) {
-        logFirestoreError({ fn: "handleSubmit:setDoc(approvals)", payload: approvalPayload }, error);
-        toast.error("Registro salvo, mas falhou ao criar a aprovação. Veja o console para detalhes.");
-        return;
+        await saveRecordWithFixedNumber(draftId, recordNumber, buildRecordPayload, buildApprovalPayload);
+      } else if (existingRecordNumber) {
+        recordNumber = existingRecordNumber;
+        await saveRecordWithFixedNumber(draftId, recordNumber, buildRecordPayload, buildApprovalPayload);
+      } else {
+        recordNumber = await createRecordWithSequentialNumber(draftId, buildRecordPayload, buildApprovalPayload);
       }
 
       try {
@@ -537,9 +576,9 @@ export default function NewRecordPage() {
 
           {Object.entries(uploadProgress)
             .filter(([key]) => !uploadFields.some((f) => f.key === key))
-            .map(([name, pct]) => (
-              <div key={name} className="flex flex-col gap-1">
-                <p className="text-xs text-muted-foreground">{name}</p>
+            .map(([id, pct]) => (
+              <div key={id} className="flex flex-col gap-1">
+                <p className="text-xs text-muted-foreground">{uploadFileNames[id] || "Enviando..."}</p>
                 <Progress value={pct} />
               </div>
             ))}
@@ -547,12 +586,12 @@ export default function NewRecordPage() {
           {attachments.length > 0 && (
             <div className="flex flex-col gap-2">
               {attachments.map((a) => (
-                <div key={a.name} className="flex items-center justify-between rounded-md border border-border p-3">
+                <div key={a.id} className="flex items-center justify-between rounded-md border border-border p-3">
                   <div className="flex items-center gap-2 min-w-0">
                     <Paperclip className="h-4 w-4 shrink-0 text-muted-foreground" />
                     <span className="truncate text-sm">{a.name}</span>
                   </div>
-                  <button onClick={() => removeAttachment(a.name)} className="text-muted-foreground hover:text-destructive">
+                  <button onClick={() => removeAttachment(a.id)} className="text-muted-foreground hover:text-destructive">
                     <X className="h-4 w-4" />
                   </button>
                 </div>

@@ -190,9 +190,9 @@ export async function generateRecordPdf(record: AppRecord, options: GenerateOpti
 
   const attachments: AttachmentRef[] = record.attachments || [];
   const uploadFieldFiles = uploadFields
-    .map((f) => record.data?.[f.key])
-    .filter((v): v is string => typeof v === "string" && !!v)
-    .map((url): AttachmentRef => ({ name: "Anexo do campo", url }));
+    .map((f) => ({ key: f.key, url: record.data?.[f.key] }))
+    .filter((v): v is { key: string; url: string } => typeof v.url === "string" && !!v.url)
+    .map(({ key, url }): AttachmentRef => ({ id: key, name: "Anexo do campo", url }));
   const allAttachments: AttachmentRef[] = [...attachments, ...uploadFieldFiles];
 
   if (allAttachments.length > 0) {

@@ -46,9 +46,9 @@ import {
 } from "@/components/ui/dialog";
 import { db } from "@/lib/firebase";
 import { useAuth } from "@/lib/auth-context";
-import { recordsCol, approvalsCol } from "@/lib/firestore-helpers";
+import { recordsCol } from "@/lib/firestore-helpers";
 import { fieldValue, statusLabels, statusVariant } from "@/lib/forms";
-import type { AppRecord, Approval } from "@/types";
+import type { AppRecord } from "@/types";
 
 // alinhado ao tema: --primary-500, --warning, --destructive, --muted-foreground, --primary-300
 const COLORS = ["#0e7a4b", "#f59e0b", "#dc2626", "#6b7280", "#6cbd90"];
@@ -62,9 +62,9 @@ type ChartKey = (typeof CHART_KEYS)[number];
 const cardMeta: Record<CardKey, { label: string; icon: typeof FileText }> = {
   total: { label: "Total de Registros", icon: FileText },
   pendentes: { label: "Pendentes de Aprovação", icon: Clock },
-  aprovados: { label: "Finalizados (Aprovados)", icon: CheckCircle2 },
-  rejeitados: { label: "Rejeitados", icon: XCircle },
-  andamento: { label: "Em Andamento", icon: Loader2 },
+  aprovados: { label: "Em Andamento", icon: CheckCircle2 },
+  rejeitados: { label: "Fluxos Reprovados", icon: XCircle },
+  andamento: { label: "Aguardando Reajuste", icon: Loader2 },
 };
 
 const chartMeta: Record<ChartKey, string> = {
@@ -102,7 +102,6 @@ export default function DashboardPage() {
   const { profile } = useAuth();
   const isAdmin = profile?.role === "admin";
   const [records, setRecords] = useState<AppRecord[]>([]);
-  const [approvals, setApprovals] = useState<Approval[]>([]);
   const [loading, setLoading] = useState(true);
   const [prefs, setPrefs] = useState<DashboardPrefs>(DEFAULT_PREFS);
   const [configOpen, setConfigOpen] = useState(false);
@@ -129,9 +128,6 @@ export default function DashboardPage() {
       },
       () => setLoading(false)
     );
-    const unsub2 = onSnapshot(approvalsCol(), (snap) => {
-      setApprovals(snap.docs.map((d) => d.data()));
-    });
     const unsub3 = onSnapshot(doc(db, "settings", "dashboardConfig"), (snap) => {
       if (snap.exists()) {
         const data = snap.data() as Partial<DashboardPrefs>;
@@ -143,7 +139,6 @@ export default function DashboardPage() {
     });
     return () => {
       unsub1();
-      unsub2();
       unsub3();
     };
   }, []);
@@ -197,19 +192,20 @@ export default function DashboardPage() {
     dateTo,
   ]);
 
-  const filteredApprovals = useMemo(() => {
-    const ids = new Set(filtered.map((r) => r.id));
-    return approvals.filter((a) => ids.has(a.recordId));
-  }, [approvals, filtered]);
-
+  // KPI counts are computed directly from each record's own `status` field —
+  // the single source of truth — rather than cross-referencing the separate
+  // `approvals` collection. Previously "Pendentes de Aprovação" counted
+  // approval docs instead, which could read 0 even with pending flows
+  // whenever an approval doc was missing/out of sync with its record.
   const stats = useMemo(() => {
-    const total = filtered.length;
-    const pendentes = filteredApprovals.filter((a) => a.status === "pendente").length;
+    // Reprovados are tracked on their own and never counted in the total.
+    const total = filtered.filter((r) => r.status !== "rejeitado").length;
+    const pendentes = filtered.filter((r) => r.status === "pendente").length;
     const aprovados = filtered.filter((r) => r.status === "aprovado").length;
     const rejeitados = filtered.filter((r) => r.status === "rejeitado").length;
-    const andamento = filtered.filter((r) => r.status === "pendente" || r.status === "reajuste").length;
+    const andamento = filtered.filter((r) => r.status === "reajuste").length;
     return { total, pendentes, aprovados, rejeitados, andamento };
-  }, [filtered, filteredApprovals]);
+  }, [filtered]);
 
   const chartData = useMemo(() => {
     const map = new Map<string, number>();
@@ -243,6 +239,7 @@ export default function DashboardPage() {
   };
 
   const drafts = useMemo(() => records.filter((r) => r.status === "rascunho").slice(0, 6), [records]);
+  const pendingRecords = useMemo(() => filtered.filter((r) => r.status === "pendente").slice(0, 6), [filtered]);
 
   async function savePrefs(next: DashboardPrefs) {
     setPrefs(next);
@@ -486,18 +483,15 @@ export default function DashboardPage() {
           <CardContent className="flex flex-col gap-2">
             {loading ? (
               Array.from({ length: 4 }).map((_, i) => <Skeleton key={i} className="h-12 w-full" />)
-            ) : filteredApprovals.filter((a) => a.status === "pendente").length === 0 ? (
+            ) : pendingRecords.length === 0 ? (
               <EmptyState text="Nenhuma pendência no momento" />
             ) : (
-              filteredApprovals
-                .filter((a) => a.status === "pendente")
-                .slice(0, 6)
-                .map((a) => (
-                  <div key={a.id} className="flex items-center justify-between rounded-xl border border-border p-3">
-                    <p className="truncate text-sm font-medium">{a.recordNumber || a.recordId}</p>
-                    <Badge variant="warning">Pendente</Badge>
-                  </div>
-                ))
+              pendingRecords.map((r) => (
+                <div key={r.id} className="flex items-center justify-between rounded-xl border border-border p-3">
+                  <p className="truncate text-sm font-medium">{r.recordNumber || r.id}</p>
+                  <Badge variant="warning">{statusLabels.pendente}</Badge>
+                </div>
+              ))
             )}
           </CardContent>
         </Card>

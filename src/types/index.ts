@@ -21,6 +21,8 @@ export interface User {
 export type RecordStatus = "rascunho" | "pendente" | "aprovado" | "rejeitado" | "reajuste";
 
 export interface AttachmentRef {
+  /** Stable unique id, independent of filename (two uploads can share a name, e.g. "IMG_001.jpg"). */
+  id: string;
   name: string;
   url: string;
   size?: number;
@@ -52,6 +54,8 @@ export interface Approval {
   id: string;
   recordId: string;
   recordNumber?: string;
+  /** Denormalized from the parent record's authorId; lets Firestore rules verify ownership without a get(). */
+  authorId?: string;
   status: "pendente" | ApprovalAction;
   comment?: string;
   reviewerId?: string;
