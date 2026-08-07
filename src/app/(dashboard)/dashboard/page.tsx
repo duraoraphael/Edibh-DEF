@@ -47,7 +47,7 @@ import {
 import { db } from "@/lib/firebase";
 import { useAuth } from "@/lib/auth-context";
 import { recordsCol } from "@/lib/firestore-helpers";
-import { fieldValue, statusLabels, statusVariant } from "@/lib/forms";
+import { fieldValue, logFirestoreError, migrateLegacyRecordNumbers, statusLabels, statusVariant } from "@/lib/forms";
 import type { AppRecord } from "@/types";
 
 // alinhado ao tema: --primary-500, --warning, --destructive, --muted-foreground, --primary-300
@@ -118,6 +118,16 @@ export default function DashboardPage() {
   const [mesFilter, setMesFilter] = useState(ALL);
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
+
+  useEffect(() => {
+    // One-time, idempotent: reformats any leftover legacy "NNNN" flow
+    // numbers to "NNN/YYYY". No-ops instantly once already migrated.
+    if (profile?.role === "admin" || profile?.role === "gerente") {
+      migrateLegacyRecordNumbers().catch((error) =>
+        logFirestoreError({ fn: "migrateLegacyRecordNumbers" }, error)
+      );
+    }
+  }, [profile?.role]);
 
   useEffect(() => {
     const unsub1 = onSnapshot(

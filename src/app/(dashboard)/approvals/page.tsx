@@ -1,13 +1,13 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { doc, onSnapshot, orderBy, query, updateDoc, where } from "firebase/firestore";
+import { doc, onSnapshot, orderBy, query, where, writeBatch } from "firebase/firestore";
 import { toast } from "sonner";
 import { CheckCircle2, ChevronDown, Clock, MessageSquareWarning, XCircle } from "lucide-react";
 import { db } from "@/lib/firebase";
 import { useAuth } from "@/lib/auth-context";
 import { approvalsCol, recordsCol, createNotifications, writeAuditLog } from "@/lib/firestore-helpers";
-import { DEFAULT_FORM_ID } from "@/lib/forms";
+import { DEFAULT_FORM_ID, logFirestoreError } from "@/lib/forms";
 import type { AppRecord, Approval, ApprovalAction, FormDefinition, FormField, LogEntry } from "@/types";
 import { logsCol } from "@/lib/firestore-helpers";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -101,28 +101,43 @@ export default function ApprovalsPage() {
     const rec = records[approval.recordId];
     const statusBefore = rec ? String(rec.status || "") : "";
     const recordAuthorId = rec ? String(rec.authorId || "") : "";
-    await updateDoc(doc(db, "approvals", approval.id), {
+
+    // The approval decision and the record's status must change together —
+    // batched so they either both commit or neither does, never a partial
+    // state where one says "aprovado" and the other is still "pendente".
+    const batch = writeBatch(db);
+    batch.update(doc(db, "approvals", approval.id), {
       status: action,
       comment: note,
       reviewerId: user?.uid,
       reviewerName: profile?.name || user?.email || undefined,
       updatedAt: new Date().toISOString(),
     });
-    await updateDoc(doc(db, "records", approval.recordId), {
+    batch.update(doc(db, "records", approval.recordId), {
       status: action,
       updatedAt: new Date().toISOString(),
     });
-    await writeAuditLog(
-      { uid: user?.uid, name: profile?.name || user?.email || undefined, role: profile?.role },
-      {
-        action: actionLabels[action],
-        recordId: approval.recordId,
-        recordNumber: approval.recordNumber,
-        statusBefore,
-        statusAfter: action,
-        detail: note,
-      }
-    );
+    await batch.commit();
+
+    // Audit log + notification are best-effort side effects: the decision
+    // itself already succeeded above, so a failure here (transient network,
+    // etc.) must never surface as "the approval failed" to the reviewer.
+    try {
+      await writeAuditLog(
+        { uid: user?.uid, name: profile?.name || user?.email || undefined, role: profile?.role },
+        {
+          action: actionLabels[action],
+          recordId: approval.recordId,
+          recordNumber: approval.recordNumber,
+          statusBefore,
+          statusAfter: action,
+          detail: note,
+        }
+      );
+    } catch (error) {
+      logFirestoreError({ fn: "processDecision:writeAuditLog" }, error);
+    }
+
     if (recordAuthorId) {
       const notifType = action === "aprovado" ? "aprovado" : action === "rejeitado" ? "rejeitado" : "reajuste";
       await createNotifications([recordAuthorId], {

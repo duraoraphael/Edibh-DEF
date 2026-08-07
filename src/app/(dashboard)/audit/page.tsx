@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { onSnapshot, orderBy, query } from "firebase/firestore";
 import { Search } from "lucide-react";
 import { logsCol } from "@/lib/firestore-helpers";
-import { roleLabels, statusLabels } from "@/lib/forms";
+import { recordNumberSortValue, roleLabels, statusLabels } from "@/lib/forms";
 import type { LogEntry, UserRole } from "@/types";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
@@ -64,7 +64,10 @@ export default function AuditPage() {
     [logs]
   );
   const recordNumbers = useMemo(
-    () => Array.from(new Set(logs.map((l) => l.recordNumber).filter(Boolean))).sort() as string[],
+    () =>
+      (Array.from(new Set(logs.map((l) => l.recordNumber).filter(Boolean))) as string[]).sort((a, b) =>
+        recordNumberSortValue(a).localeCompare(recordNumberSortValue(b))
+      ),
     [logs]
   );
   const statuses = useMemo(

@@ -31,8 +31,13 @@ export default function LoginPage() {
       await signIn(email, password);
       toast.success("Login realizado com sucesso");
       router.replace("/dashboard");
-    } catch {
-      toast.error("Credenciais inválidas. Verifique e tente novamente.");
+    } catch (error) {
+      const code = (error as { code?: string })?.code;
+      toast.error(
+        code === "auth/too-many-requests"
+          ? "Muitas tentativas. Aguarde alguns minutos e tente novamente."
+          : "Credenciais inválidas. Verifique e tente novamente."
+      );
     } finally {
       setSubmitting(false);
     }

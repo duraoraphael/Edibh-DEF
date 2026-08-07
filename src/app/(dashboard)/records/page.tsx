@@ -40,7 +40,14 @@ import { exportRecordsToExcel } from "@/lib/excel-export";
 import { db } from "@/lib/firebase";
 import { logsCol, recordsCol, writeAuditLog } from "@/lib/firestore-helpers";
 import { useAuth } from "@/lib/auth-context";
-import { DEFAULT_FORM_ID, fieldValue, formatRecordNumber, statusLabels } from "@/lib/forms";
+import {
+  DEFAULT_FORM_ID,
+  fieldValue,
+  formatRecordNumber,
+  logFirestoreError,
+  recordNumberSortValue,
+  statusLabels,
+} from "@/lib/forms";
 import { ExcelImportDialog } from "@/components/records/excel-import-dialog";
 import { RecordRow } from "@/components/records/record-row";
 import { generateRecordPdf, generateRecordsTablePdf } from "@/lib/pdf";
@@ -298,11 +305,15 @@ export default function RecordsHistoryPage() {
     if (newStatus === r.status) return;
     setUpdatingStatus(true);
     try {
-      await updateDoc(doc(db, "records", r.id), {
+      // Record + its approval doc change status together, atomically — a
+      // batch instead of two independent writes, so there's never a partial
+      // state where one updated and the other didn't.
+      const batch = writeBatch(db);
+      batch.update(doc(db, "records", r.id), {
         status: newStatus,
         updatedAt: new Date().toISOString(),
       });
-      await setDoc(
+      batch.set(
         doc(db, "approvals", r.id),
         {
           recordId: r.id,
@@ -315,19 +326,30 @@ export default function RecordsHistoryPage() {
         },
         { merge: true }
       );
-      await writeAuditLog(
-        { uid: user?.uid, name: profile?.name || user?.email || undefined, role: profile?.role },
-        {
-          action: `Status alterado para ${statusLabels[newStatus]}`,
-          recordId: r.id,
-          recordNumber: r.recordNumber,
-          statusBefore: r.status,
-          statusAfter: newStatus,
-        }
-      );
+      await batch.commit();
+
       setSelected((prev) => (prev && prev.id === r.id ? { ...prev, status: newStatus } : prev));
       toast.success(`Status alterado para ${statusLabels[newStatus]}`);
-    } catch {
+
+      // Best-effort: the status change above already succeeded, so a
+      // failure here (transient network, etc.) must never make an
+      // otherwise-successful change look like it failed.
+      try {
+        await writeAuditLog(
+          { uid: user?.uid, name: profile?.name || user?.email || undefined, role: profile?.role },
+          {
+            action: `Status alterado para ${statusLabels[newStatus]}`,
+            recordId: r.id,
+            recordNumber: r.recordNumber,
+            statusBefore: r.status,
+            statusAfter: newStatus,
+          }
+        );
+      } catch (error) {
+        logFirestoreError({ fn: "updateRecordStatus:writeAuditLog" }, error);
+      }
+    } catch (error) {
+      logFirestoreError({ fn: "updateRecordStatus", payload: { recordId: r.id, newStatus } }, error);
       toast.error("Erro ao alterar status");
     } finally {
       setUpdatingStatus(false);
@@ -387,8 +409,14 @@ export default function RecordsHistoryPage() {
     if (dateTo) list = list.filter((r) => r.createdAt && r.createdAt <= dateTo + "T23:59:59");
 
     const fieldKeys: SortKey[] = ["instalacao", "sistema", "equipamento", "gerencia"];
-    const sortValue = (r: AppRecord): string =>
-      fieldKeys.includes(sortKey) ? fieldValue(r, sortKey) : ((r as unknown as Record<string, string>)[sortKey] || "");
+    const sortValue = (r: AppRecord): string => {
+      if (fieldKeys.includes(sortKey)) return fieldValue(r, sortKey);
+      // "NNN/YYYY" doesn't sort correctly as a plain string across a year
+      // boundary (e.g. "999/2026" > "100/2027" lexicographically); reorder
+      // to "YYYY-NNN" so string comparison matches chronological order.
+      if (sortKey === "recordNumber") return recordNumberSortValue(r.recordNumber);
+      return (r as unknown as Record<string, string>)[sortKey] || "";
+    };
     list = [...list].sort((a, b) => {
       const cmp = sortValue(a).localeCompare(sortValue(b));
       return sortDir === "asc" ? cmp : -cmp;

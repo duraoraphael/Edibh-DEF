@@ -1,4 +1,4 @@
-import { doc, getDoc, getDocs, query, runTransaction, where } from "firebase/firestore";
+import { doc, getDoc, getDocs, query, runTransaction, setDoc, where, writeBatch } from "firebase/firestore";
 import { db } from "./firebase";
 import { recordsCol } from "./firestore-helpers";
 import type { AppRecord, FormField, FormFieldType, RecordStatus, UserRole } from "@/types";
@@ -161,6 +161,18 @@ export function formatRecordNumber(seq: number, year: number): string {
   return `${String(seq).padStart(3, "0")}/${year}`;
 }
 
+/**
+ * Reorders "NNN/YYYY" to "YYYY-NNN" so plain string comparison sorts
+ * chronologically — "NNN/YYYY" alone doesn't (e.g. "999/2026" > "100/2027"
+ * lexicographically, the wrong order). Falls back to the raw value for
+ * legacy/malformed numbers so they still sort somewhere, just not specially.
+ */
+export function recordNumberSortValue(recordNumber?: string): string {
+  const raw = recordNumber?.trim() || "";
+  const m = /^(\d+)\/(\d{4})$/.exec(raw);
+  return m ? `${m[2]}-${m[1].padStart(3, "0")}` : raw;
+}
+
 /** Matches both the current "NNN/YYYY" format and the legacy bare "NNNN" format. */
 const RECORD_NUMBER_PATTERN = /^(\d+)(?:\/(\d{4}))?$/;
 
@@ -304,4 +316,52 @@ export async function saveRecordWithFixedNumber(
     tx.set(recordRef, sanitizeForFirestore(buildRecordPayload(recordNumber)), { merge: true });
     tx.set(approvalRef, sanitizeForFirestore(buildApprovalPayload(recordNumber)));
   });
+}
+
+const RECORD_NUMBER_FORMAT_MIGRATION_FLAG = "recordNumberFormatMigration";
+
+/** Bare digits only, no "/YYYY" suffix — the format used before "NNN/YYYY" existed. */
+const LEGACY_BARE_RECORD_NUMBER = /^\d+$/;
+
+/**
+ * One-time, idempotent migration: reformats every record still on the old
+ * bare "NNNN" number (e.g. "0001") to "NNN/YYYY", using that record's own
+ * `createdAt` year — it re-labels the existing sequence value, it does NOT
+ * renumber/reassign anything, so no record's relative order or identity
+ * changes and no data is lost. A `settings` flag doc marks completion so it
+ * never re-scans (or re-writes) once done; safe to call on every load in
+ * the meantime since re-running it before completion just re-derives the
+ * same target value for the same records (no-op on retry/race).
+ */
+export async function migrateLegacyRecordNumbers(): Promise<void> {
+  const flagRef = doc(db, "settings", RECORD_NUMBER_FORMAT_MIGRATION_FLAG);
+  const already = await getDoc(flagRef);
+  if (already.exists()) return;
+
+  const snap = await getDocs(recordsCol());
+  let batch = writeBatch(db);
+  let opsInBatch = 0;
+  const now = new Date().toISOString();
+
+  for (const docSnap of snap.docs) {
+    const r = docSnap.data() as AppRecord;
+    const raw = r.recordNumber?.trim();
+    if (!raw || !LEGACY_BARE_RECORD_NUMBER.test(raw)) continue;
+    const seq = parseInt(raw, 10);
+    if (Number.isNaN(seq)) continue;
+    const year = r.createdAt ? new Date(r.createdAt).getFullYear() : new Date().getFullYear();
+    batch.update(doc(db, "records", docSnap.id), {
+      recordNumber: formatRecordNumber(seq, year),
+      updatedAt: now,
+    });
+    opsInBatch += 1;
+    if (opsInBatch >= 400) {
+      await batch.commit();
+      batch = writeBatch(db);
+      opsInBatch = 0;
+    }
+  }
+  if (opsInBatch > 0) await batch.commit();
+
+  await setDoc(flagRef, { completedAt: now }, { merge: true });
 }

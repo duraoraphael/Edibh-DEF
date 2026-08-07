@@ -1,0 +1,28 @@
+DNS records for production — replace <SEU_DOMINIO> with the real domain
+(only applies once a custom domain is attached in Vercel; the default
+*.vercel.app domain is managed by Vercel and does not accept custom DNS).
+
+HTTPS
+  Vercel issues/renews TLS and redirects HTTP -> HTTPS automatically for
+  every domain attached in Project Settings > Domains. No DNS record needed
+  beyond pointing the domain at Vercel (A/ALIAS to 76.76.21.21 or CNAME to
+  cname.vercel-dns.com, per Vercel's domain setup screen).
+
+CAA (restrict which CAs may issue certificates for the domain)
+  <SEU_DOMINIO>.   CAA   0 issue "letsencrypt.org"
+  <SEU_DOMINIO>.   CAA   0 issue "pki.goog"
+  <SEU_DOMINIO>.   CAA   0 iodef "mailto:security@<SEU_DOMINIO>"
+
+SPF (only if you send email FROM this domain — this app itself only opens
+mailto: links, it does not send mail server-side; set this on whatever
+domain your outbound mail actually uses)
+  <SEU_DOMINIO>.   TXT   "v=spf1 include:_spf.<SEU_PROVEDOR_DE_EMAIL> -all"
+
+DKIM (selector + public key come from your email provider's dashboard —
+Google Workspace, Microsoft 365, SES, etc. each generate their own; there is
+no generic value to hand out here, only the record shape)
+  <SELETOR>._domainkey.<SEU_DOMINIO>.   TXT   "v=DKIM1; k=rsa; p=<CHAVE_PUBLICA_DO_PROVEDOR>"
+
+DMARC (start at p=none to monitor, then tighten to quarantine/reject once
+SPF+DKIM are verified passing in the reports)
+  _dmarc.<SEU_DOMINIO>.   TXT   "v=DMARC1; p=none; rua=mailto:dmarc@<SEU_DOMINIO>; adkim=s; aspf=s"

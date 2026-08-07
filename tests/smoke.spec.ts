@@ -1,18 +1,26 @@
-import { test, expect } from '@playwright/test';
+import { test, expect } from "@playwright/test";
 
-test('has title', async ({ page }) => {
-  await page.goto('https://playwright.dev/');
-
-  // Expect a title "to contain" a substring.
-  await expect(page).toHaveTitle(/Playwright/);
+test("unauthenticated visitor is redirected to /login", async ({ page }) => {
+  await page.goto("/");
+  // Firebase Auth's cold-start check (no cached session yet) can take a few
+  // seconds on a fresh browser profile, longer than most assertions need.
+  await expect(page).toHaveURL(/\/login$/, { timeout: 15_000 });
+  await expect(page.getByRole("heading", { name: "Fluxo de Equipamentos" })).toBeVisible();
 });
 
-test('get started link', async ({ page }) => {
-  await page.goto('https://playwright.dev/');
+test("login form renders with required fields", async ({ page }) => {
+  await page.goto("/login");
+  await expect(page.getByLabel("E-mail")).toBeVisible();
+  await expect(page.getByLabel("Senha")).toBeVisible();
+  await expect(page.getByRole("button", { name: "Entrar" })).toBeVisible();
+});
 
-  // Click the get started link.
-  await page.getByRole('link', { name: 'Get started' }).click();
-
-  // Expects page to have a heading with the name of Installation.
-  await expect(page.getByRole('heading', { name: 'Installation' })).toBeVisible();
+test("security headers are present on every response", async ({ page }) => {
+  const response = await page.goto("/login");
+  const headers = response!.headers();
+  expect(headers["content-security-policy"]).toContain("default-src 'self'");
+  expect(headers["strict-transport-security"]).toContain("max-age=");
+  expect(headers["x-frame-options"]).toBe("SAMEORIGIN");
+  expect(headers["x-content-type-options"]).toBe("nosniff");
+  expect(headers["cross-origin-opener-policy"]).toBe("same-origin");
 });

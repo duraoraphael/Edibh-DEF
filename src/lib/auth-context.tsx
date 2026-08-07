@@ -79,6 +79,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [user]);
 
   const signIn = useCallback(async (email: string, password: string) => {
+    const check = await fetch("/api/auth/login-check", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email }),
+    }).catch(() => null);
+    if (check && check.status === 429) {
+      const retryAfter = check.headers.get("Retry-After");
+      const err = new Error("rate-limited") as Error & { code: string };
+      err.code = "auth/too-many-requests";
+      throw retryAfter ? Object.assign(err, { retryAfter }) : err;
+    }
+
     const credential = await signInWithEmailAndPassword(auth, email, password);
     await updateDoc(doc(db, "users", credential.user.uid), {
       lastActive: serverTimestamp(),

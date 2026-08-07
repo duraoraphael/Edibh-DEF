@@ -1,6 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
+import { isSameOrigin, rejectPreflight } from "@/lib/api-guards";
+
+export const OPTIONS = rejectPreflight;
 
 export async function GET(req: NextRequest) {
+  if (!isSameOrigin(req)) {
+    return NextResponse.json({ error: "origem não permitida" }, { status: 403 });
+  }
+
   const url = req.nextUrl.searchParams.get("url");
   const filename = req.nextUrl.searchParams.get("filename") || "download";
   if (!url) return NextResponse.json({ error: "url obrigatória" }, { status: 400 });
