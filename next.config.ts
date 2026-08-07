@@ -27,18 +27,31 @@ const csp = [
   "object-src 'none'",
   "base-uri 'self'",
   "form-action 'self'",
-  "frame-ancestors 'self'",
+  // Nothing in this app frames itself or is meant to be framed by anyone —
+  // the one <iframe> in the app (email preview) uses srcDoc for local
+  // content, unrelated to who may frame *this* app. 'none' is strictly
+  // tighter than 'self' and matches X-Frame-Options below.
+  "frame-ancestors 'none'",
   "upgrade-insecure-requests",
 ].join("; ");
 
+// Canonical origin for this deployment. Vercel's edge cache adds
+// "Access-Control-Allow-Origin: *" to cached/prerendered pages by default —
+// confirmed live on https://fluxocriticos.vercel.app/ and /login, neither
+// of which this app ever set — so it's declared explicitly here to
+// override the platform default with the app's real origin instead of a
+// wildcard. Override via NEXT_PUBLIC_SITE_URL if a custom domain is added.
+const siteOrigin = process.env.NEXT_PUBLIC_SITE_URL || "https://fluxocriticos.vercel.app";
+
 const securityHeaders = [
   { key: "Content-Security-Policy", value: csp },
-  { key: "X-Frame-Options", value: "SAMEORIGIN" },
+  { key: "X-Frame-Options", value: "DENY" },
   { key: "X-Content-Type-Options", value: "nosniff" },
   { key: "Referrer-Policy", value: "strict-origin-when-cross-origin" },
   { key: "Permissions-Policy", value: "camera=(), microphone=(), geolocation=()" },
   { key: "Strict-Transport-Security", value: "max-age=63072000; includeSubDomains; preload" },
   { key: "X-DNS-Prefetch-Control", value: "off" },
+  { key: "Access-Control-Allow-Origin", value: siteOrigin },
   // 'credentialless' (not 'require-corp') so cross-origin assets that don't
   // send CORP/CORS headers — Firebase Storage images, Google avatar URLs —
   // still load; 'require-corp' would silently break those.

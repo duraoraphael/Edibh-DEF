@@ -20,7 +20,8 @@ test("security headers are present on every response", async ({ page }) => {
   const headers = response!.headers();
   expect(headers["content-security-policy"]).toContain("default-src 'self'");
   expect(headers["strict-transport-security"]).toContain("max-age=");
-  expect(headers["x-frame-options"]).toBe("SAMEORIGIN");
+  expect(headers["x-frame-options"]).toBe("DENY");
   expect(headers["x-content-type-options"]).toBe("nosniff");
   expect(headers["cross-origin-opener-policy"]).toBe("same-origin");
+  expect(headers["access-control-allow-origin"]).not.toBe("*");
 });

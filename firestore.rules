@@ -42,7 +42,8 @@ service cloud.firestore {
       allow create: if isSignedIn() && request.auth.uid == userId;
       allow update: if isAdmin()
         || (isSignedIn() && request.auth.uid == userId
-            && request.resource.data.role == resource.data.role);
+            && request.resource.data.role == resource.data.role
+            && request.resource.data.status == resource.data.status);
       allow delete: if isAdmin();
     }
 
