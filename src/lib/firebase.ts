@@ -25,13 +25,29 @@ export const firebaseConfig = {
   appId: process.env.NEXT_PUBLIC_FIREBASE_APP_ID,
 };
 
-if (Object.values(firebaseConfig).some((v) => !v)) {
-  throw new Error(
+const configIsValid = Object.values(firebaseConfig).every(Boolean);
+if (!configIsValid) {
+  console.error(
     "Missing Firebase env vars — set NEXT_PUBLIC_FIREBASE_* in .env.local (see .env.local.example) and in Vercel project settings."
   );
 }
 
-const app = getApps().length ? getApp() : initializeApp(firebaseConfig);
+// This module is imported (via AuthProvider) from the root layout, so it
+// runs during Next.js's static prerendering on the server for every page —
+// including ones that never touch Firebase. getAuth() validates the config
+// eagerly and throws on a missing/malformed apiKey, which previously took
+// down the ENTIRE build the moment the project's env vars weren't set yet.
+// Nothing server-rendered actually calls Firebase (all real usage happens
+// inside client-only effects/handlers), so only the browser needs a real,
+// valid config; on the server without one, swap in a syntactically-valid
+// placeholder just so SDK construction doesn't throw. Once real env vars
+// are set (in .env.local and in Vercel), this branch is never used.
+const sdkConfig =
+  configIsValid || typeof window !== "undefined"
+    ? firebaseConfig
+    : { ...firebaseConfig, apiKey: "build-placeholder-key" };
+
+const app = getApps().length ? getApp() : initializeApp(sdkConfig as typeof firebaseConfig);
 
 export const auth = getAuth(app);
 export const db = initializeFirestore(app, {
