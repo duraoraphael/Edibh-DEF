@@ -125,6 +125,8 @@ export default function RecordsHistoryPage() {
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [bulkDeleteOpen, setBulkDeleteOpen] = useState(false);
   const [bulkDeleting, setBulkDeleting] = useState(false);
+  const [bulkPermanentDeleteOpen, setBulkPermanentDeleteOpen] = useState(false);
+  const [bulkPermanentDeleting, setBulkPermanentDeleting] = useState(false);
   const [view, setView] = useState<"ativos" | "removidos">("ativos");
   const [dense, setDense] = useState(false);
   const [renumberOpen, setRenumberOpen] = useState(false);
@@ -570,6 +572,35 @@ export default function RecordsHistoryPage() {
     setBulkDeleting(false);
   }
 
+  async function permanentDeleteSelected() {
+    setBulkPermanentDeleting(true);
+    const ids = Array.from(selectedIds);
+    let ok = 0;
+    for (const id of ids) {
+      const r = records.find((rec) => rec.id === id);
+      try {
+        await writeAuditLog(
+          { uid: user?.uid, name: profile?.name || user?.email || undefined, role: profile?.role },
+          {
+            action: "Excluído permanentemente",
+            recordId: id,
+            recordNumber: r?.recordNumber,
+            statusBefore: r?.status,
+            statusAfter: "",
+          }
+        );
+        await deleteDoc(doc(db, "records", id));
+        ok += 1;
+      } catch {
+        // continue deleting the rest even if one record fails
+      }
+    }
+    toast.success(`${ok} registro(s) excluído(s) permanentemente`);
+    setSelectedIds(new Set());
+    setBulkPermanentDeleteOpen(false);
+    setBulkPermanentDeleting(false);
+  }
+
   async function restoreRecord(r: AppRecord) {
     try {
       await writeAuditLog(
@@ -723,6 +754,12 @@ export default function RecordsHistoryPage() {
               Excluir selecionados ({selectedIds.size})
             </Button>
           )}
+          {view === "removidos" && canPermanentDelete() && selectedIds.size > 0 && (
+            <Button variant="destructive" onClick={() => setBulkPermanentDeleteOpen(true)}>
+              <Trash2 className="h-4 w-4" />
+              Remover dos dashboards ({selectedIds.size})
+            </Button>
+          )}
           {view === "ativos" && canDelete() && (
             <Button variant="outline" onClick={() => setRenumberOpen(true)}>
               <ListOrdered className="h-4 w-4" />
@@ -856,7 +893,7 @@ export default function RecordsHistoryPage() {
           <Table>
             <TableHeader className="sticky top-0 z-10 bg-card">
               <TableRow>
-                {view === "ativos" && canDelete() && (
+                {((view === "ativos" && canDelete()) || (view === "removidos" && canPermanentDelete())) && (
                   <TableHead className="w-8">
                     <input
                       type="checkbox"
@@ -916,7 +953,7 @@ export default function RecordsHistoryPage() {
                   record={r}
                   dense={dense}
                   onClick={() => setSelected(r)}
-                  selectable={view === "ativos" && canDelete()}
+                  selectable={(view === "ativos" && canDelete()) || (view === "removidos" && canPermanentDelete())}
                   selected={selectedIds.has(r.id)}
                   onToggleSelected={() => toggleSelected(r.id)}
                   actions={
@@ -1237,6 +1274,26 @@ export default function RecordsHistoryPage() {
             </Button>
             <Button variant="destructive" onClick={deleteSelected} disabled={bulkDeleting}>
               {bulkDeleting ? "Excluindo..." : "Excluir"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={bulkPermanentDeleteOpen} onOpenChange={(o) => !bulkPermanentDeleting && setBulkPermanentDeleteOpen(o)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Remover fluxos dos dashboards</DialogTitle>
+          </DialogHeader>
+          <p className="text-sm text-muted-foreground">
+            Tem certeza que deseja excluir permanentemente {selectedIds.size} registro(s)? Esta ação não pode ser
+            desfeita e os registros serão removidos dos dashboards.
+          </p>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setBulkPermanentDeleteOpen(false)} disabled={bulkPermanentDeleting}>
+              Cancelar
+            </Button>
+            <Button variant="destructive" onClick={permanentDeleteSelected} disabled={bulkPermanentDeleting}>
+              {bulkPermanentDeleting ? "Removendo..." : "Remover permanentemente"}
             </Button>
           </DialogFooter>
         </DialogContent>
