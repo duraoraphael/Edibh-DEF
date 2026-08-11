@@ -163,14 +163,47 @@ export function ExcelImportDialog({
       const sheetName = wb.SheetNames[0];
       if (!sheetName) { setParseError("Planilha inexistente no arquivo"); return; }
       const sheet = wb.Sheets[sheetName];
-      const json = XLSX.utils.sheet_to_json<Record<string, unknown>>(sheet, { defval: "" });
-      if (json.length === 0) { setParseError("Arquivo vazio ou sem linhas de dados"); return; }
-      const hdrs = Object.keys(json[0]);
+
+      const allRaw = XLSX.utils.sheet_to_json<unknown[]>(sheet, { header: 1, defval: "" });
+      if (allRaw.length === 0) { setParseError("Arquivo vazio ou sem linhas de dados"); return; }
+
+      let headerRowIdx = 0;
+      let bestScore = -1;
+      for (let i = 0; i < Math.min(allRaw.length, 30); i++) {
+        const row = allRaw[i] as unknown[];
+        const score = row.filter(
+          (c) => c !== "" && c !== null && c !== undefined && !(c instanceof Date) && typeof c !== "number"
+        ).length;
+        if (score > bestScore) { bestScore = score; headerRowIdx = i; }
+      }
+
+      const rawHdrRow = allRaw[headerRowIdx] as unknown[];
+      const usedNames = new Map<string, number>();
+      const hdrs: string[] = [];
+      const hdrIndexMap: number[] = [];
+      rawHdrRow.forEach((h, colIdx) => {
+        const raw = String(h ?? "").trim();
+        if (!raw) return;
+        const count = (usedNames.get(raw) || 0) + 1;
+        usedNames.set(raw, count);
+        hdrs.push(count > 1 ? `${raw}_${count}` : raw);
+        hdrIndexMap.push(colIdx);
+      });
+
       if (hdrs.length === 0) { setParseError("Cabeçalhos ausentes na planilha"); return; }
-      const parsedRows: ParsedRow[] = json
-        .map((raw, index) => ({ raw, index }))
+
+      const parsedRows: ParsedRow[] = allRaw
+        .slice(headerRowIdx + 1)
+        .map((row, idx) => {
+          const arr = row as unknown[];
+          const obj: Record<string, unknown> = {};
+          hdrs.forEach((h, i) => { obj[h] = arr[hdrIndexMap[i]] ?? ""; });
+          return { raw: obj, index: idx };
+        })
         .filter(({ raw }) => Object.values(raw).some((v) => String(v).trim() !== ""));
+
       if (parsedRows.length === 0) { setParseError("Nenhuma linha com dados válidos"); return; }
+
       setHeaders(hdrs);
       setRows(parsedRows);
       setMapping({
