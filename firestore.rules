@@ -53,9 +53,10 @@ service cloud.firestore {
       allow read: if isSignedIn();
       allow create: if isSignedIn() && role() != 'visualizador'
         && request.resource.data.authorId == request.auth.uid;
-      allow update: if (isAdminOrGerente()
-          || (isTecnico() && resource.data.authorId == request.auth.uid))
-        && request.resource.data.authorId == resource.data.authorId;
+      allow update: if isAdminOrGerente()
+        || (isTecnico()
+          && resource.data.authorId == request.auth.uid
+          && request.resource.data.authorId == resource.data.authorId);
       allow delete: if isAdmin();
 
       match /updates/{updateId} {

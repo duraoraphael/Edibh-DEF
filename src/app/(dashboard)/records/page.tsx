@@ -51,7 +51,7 @@ import {
 import { ExcelImportDialog } from "@/components/records/excel-import-dialog";
 import { RecordRow } from "@/components/records/record-row";
 import { generateRecordPdf, generateRecordsTablePdf } from "@/lib/pdf";
-import type { AppRecord, FormDefinition, FormField, LogEntry, RecordStatus } from "@/types";
+import type { AppRecord, FormDefinition, FormField, LogEntry, RecordStatus, User } from "@/types";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -141,10 +141,19 @@ export default function RecordsHistoryPage() {
   const [savingUpdateEdit, setSavingUpdateEdit] = useState(false);
   const [deletingUpdateId, setDeletingUpdateId] = useState<string | null>(null);
   const [updatingStatus, setUpdatingStatus] = useState(false);
+  const [users, setUsers] = useState<User[]>([]);
+  const [updatingResponsible, setUpdatingResponsible] = useState(false);
 
   useEffect(() => {
     const unsub = onSnapshot(doc(db, "formFields", DEFAULT_FORM_ID), (snap) => {
       setFormFields(snap.exists() ? ((snap.data() as FormDefinition).fields || []) : []);
+    });
+    return () => unsub();
+  }, []);
+
+  useEffect(() => {
+    const unsub = onSnapshot(collection(db, "users"), (snap) => {
+      setUsers(snap.docs.map((d) => d.data() as User));
     });
     return () => unsub();
   }, []);
@@ -299,7 +308,43 @@ export default function RecordsHistoryPage() {
     }
   }
 
-  const EDITABLE_STATUS_TARGETS: RecordStatus[] = ["pendente", "aprovado", "rejeitado"];
+  const EDITABLE_STATUS_TARGETS: RecordStatus[] = ["pendente", "aprovado", "rejeitado", "concluido", "concluido_direto"];
+
+  const responsibleUsers = useMemo(
+    () => users.filter((u) => u.status !== "inativo" && u.role !== "visualizador").sort((a, b) => a.name.localeCompare(b.name)),
+    [users]
+  );
+
+  async function updateResponsible(r: AppRecord, newAuthorId: string) {
+    const next = responsibleUsers.find((u) => u.id === newAuthorId);
+    if (!next || next.id === r.authorId || !canChangeResponsible()) return;
+    setUpdatingResponsible(true);
+    try {
+      const now = new Date().toISOString();
+      const batch = writeBatch(db);
+      batch.update(doc(db, "records", r.id), { authorId: next.id, authorName: next.name || next.email, updatedAt: now });
+      batch.set(doc(db, "approvals", r.id), { authorId: next.id, updatedAt: now }, { merge: true });
+      await batch.commit();
+      setSelected((prev) => (prev && prev.id === r.id ? { ...prev, authorId: next.id, authorName: next.name || next.email } : prev));
+      await writeAuditLog(
+        { uid: user?.uid, name: profile?.name || user?.email || undefined, role: profile?.role },
+        {
+          action: "Responsável do registro alterado",
+          recordId: r.id,
+          recordNumber: r.recordNumber,
+          statusBefore: r.status,
+          statusAfter: r.status,
+          detail: `${r.authorName || r.authorId} → ${next.name || next.email}`,
+        }
+      );
+      toast.success("Responsável alterado");
+    } catch (error) {
+      logFirestoreError({ fn: "updateResponsible", payload: { recordId: r.id, newAuthorId } }, error);
+      toast.error("Erro ao alterar responsável");
+    } finally {
+      setUpdatingResponsible(false);
+    }
+  }
 
   async function updateRecordStatus(r: AppRecord, newStatus: RecordStatus) {
     if (newStatus === r.status) return;
@@ -685,6 +730,10 @@ export default function RecordsHistoryPage() {
     return profile.role === "tecnico" && r.authorId === user?.uid;
   }
 
+  function canChangeResponsible() {
+    return profile?.role === "admin" || profile?.role === "gerente";
+  }
+
   function canDelete() {
     return profile?.role === "admin" || profile?.role === "gerente";
   }
@@ -1023,7 +1072,29 @@ export default function RecordsHistoryPage() {
                     <StatusBadge status={selected.status} />
                   )}
                 </DialogTitle>
-                <p className="text-sm text-muted-foreground">Responsável: {selected.authorName || "—"}</p>
+                {canChangeResponsible() ? (
+                  <div className="flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
+                    <span>Responsável:</span>
+                    <Select
+                      value={selected.authorId}
+                      onValueChange={(value) => updateResponsible(selected, value)}
+                      disabled={updatingResponsible}
+                    >
+                      <SelectTrigger className="h-8 min-w-52 text-sm">
+                        <SelectValue placeholder="Selecione o responsável" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {responsibleUsers.map((responsible) => (
+                          <SelectItem key={responsible.id} value={responsible.id}>
+                            {responsible.name || responsible.email}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                ) : (
+                  <p className="text-sm text-muted-foreground">Responsável: {selected.authorName || "—"}</p>
+                )}
               </DialogHeader>
               <div className="grid min-h-0 grid-cols-1 lg:grid-cols-[1.4fr_1fr]">
                 <div className="flex flex-col gap-5 overflow-y-auto border-b border-border p-6 lg:border-b-0 lg:border-r">

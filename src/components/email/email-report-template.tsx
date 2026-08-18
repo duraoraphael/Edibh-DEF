@@ -28,6 +28,8 @@ export interface EmailTemplateData {
   record: AppRecord;
   fields: FormField[];
   images?: EmailImage[];
+  parameter?: string;
+  dataSource?: string;
   logoLeftUrl?: string;
   logoRightUrl?: string;
 }
@@ -74,6 +76,8 @@ export function renderEmailReportHtml({
   record,
   fields,
   images = [],
+  parameter,
+  dataSource,
   logoLeftUrl = "https://fluxocriticos.vercel.app/cim-compartilhado.png",
   logoRightUrl = "https://fluxocriticos.vercel.app/petrobras.png",
 }: EmailTemplateData): string {
@@ -120,6 +124,18 @@ export function renderEmailReportHtml({
       </tr>`;
     })
     .join("");
+
+  const emailMetadataHtml = parameter || dataSource ? `
+  <tr>
+    <td style="padding:12px 19px 0;">
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
+        <tr>
+          ${parameter ? dataCard("Parâmetro", escapeHtml(parameter), !dataSource) : ""}
+          ${dataSource ? dataCard("Fonte de dados", escapeHtml(dataSource), !parameter) : ""}
+        </tr>
+      </table>
+    </td>
+  </tr>` : "";
 
   let imagesHtml = "";
   if (images.length) {
@@ -212,6 +228,7 @@ export function renderEmailReportHtml({
       </table>
     </td>
   </tr>
+  ${emailMetadataHtml}
 
   <tr>
     <td style="padding:0 24px;">

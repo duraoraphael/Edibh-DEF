@@ -18,7 +18,14 @@ export interface User {
   createdAt?: string;
 }
 
-export type RecordStatus = "rascunho" | "pendente" | "aprovado" | "rejeitado" | "reajuste";
+export type RecordStatus =
+  | "rascunho"
+  | "pendente"
+  | "aprovado"
+  | "rejeitado"
+  | "reajuste"
+  | "concluido"
+  | "concluido_direto";
 
 export interface AttachmentRef {
   /** Stable unique id, independent of filename (two uploads can share a name, e.g. "IMG_001.jpg"). */
@@ -145,6 +152,8 @@ export interface EmailRecordLog {
   to: string;
   subject: string;
   message: string;
+  parameter?: string;
+  dataSource?: string;
   senderId?: string;
   senderName?: string;
   createdAt?: string;

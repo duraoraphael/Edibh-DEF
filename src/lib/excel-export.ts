@@ -15,6 +15,8 @@ const statusColors: Record<RecordStatus, { fg: string; bg: string }> = {
   aprovado: { fg: "FF166534", bg: "FFDCFCE7" },
   rejeitado: { fg: "FF991B1B", bg: "FFFEE2E2" },
   reajuste: { fg: "FF92400E", bg: "FFFEF3C7" },
+  concluido: { fg: "FF166534", bg: "FFDCFCE7" },
+  concluido_direto: { fg: "FF166534", bg: "FFDCFCE7" },
 };
 
 const thinBorder = { style: "thin" as const, color: { argb: BORDER_COLOR } };

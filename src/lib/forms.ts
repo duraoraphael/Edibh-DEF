@@ -9,6 +9,8 @@ export const statusLabels: Record<RecordStatus, string> = {
   aprovado: "Em Andamento",
   rejeitado: "Reprovado",
   reajuste: "Aguardando Reajuste",
+  concluido: "Concluído",
+  concluido_direto: "Concluído direto",
 };
 
 export const statusVariant: Record<RecordStatus, "default" | "warning" | "success" | "destructive" | "secondary"> = {
@@ -17,6 +19,8 @@ export const statusVariant: Record<RecordStatus, "default" | "warning" | "succes
   aprovado: "success",
   rejeitado: "destructive",
   reajuste: "warning",
+  concluido: "success",
+  concluido_direto: "success",
 };
 
 export function fieldValue(r: AppRecord, key: string): string {

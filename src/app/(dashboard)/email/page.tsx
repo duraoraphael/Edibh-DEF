@@ -10,7 +10,7 @@ import { emailLogsCol, recordsCol, usersCol } from "@/lib/firestore-helpers";
 import { useAuth } from "@/lib/auth-context";
 import { DEFAULT_FORM_ID, logFirestoreError, statusLabels } from "@/lib/forms";
 import type { AppRecord, FormDefinition, User } from "@/types";
-import { renderEmailReportHtml, buildEmailSubject } from "@/components/email/email-report-template";
+import { buildEmailSubject, renderEmailReportHtml } from "@/components/email/email-report-template";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
