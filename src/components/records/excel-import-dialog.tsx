@@ -7,7 +7,7 @@ import { toast } from "sonner";
 import { Upload, Loader2, AlertTriangle, CheckCircle2, FileSpreadsheet, X, Trash2 } from "lucide-react";
 import { db } from "@/lib/firebase";
 import { recordsCol } from "@/lib/firestore-helpers";
-import { reserveSequentialNumbers } from "@/lib/forms";
+import { reserveSequentialNumbers, slugifyKey } from "@/lib/forms";
 import type { AppRecord, RecordStatus } from "@/types";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
@@ -47,6 +47,21 @@ const AUTO_DETECT: Record<FieldKey, string[]> = {
   responsavel: ["responsavel", "responsável", "usuario", "usuário", "owner"],
 };
 
+const STATUS_AUTO_DETECT = ["status", "situacao", "situação", "estado"];
+const DATE_AUTO_DETECT = ["data", "date", "data_criacao", "criado_em", "data de criacao", "data de criação"];
+
+const STATUS_LABEL_TO_ENUM: Record<string, RecordStatus> = {
+  rascunho: "rascunho",
+  "em análise": "pendente",
+  "em andamento": "aprovado",
+  reprovado: "rejeitado",
+  "aguardando reajuste": "reajuste",
+  pendente: "pendente",
+  aprovado: "aprovado",
+  rejeitado: "rejeitado",
+  reajuste: "reajuste",
+};
+
 function normalize(s: string): string {
   return s
     .normalize("NFD")
@@ -55,10 +70,22 @@ function normalize(s: string): string {
     .toLowerCase();
 }
 
-function autoDetectColumn(headers: string[], key: FieldKey): string {
-  const candidates = AUTO_DETECT[key];
-  const found = headers.find((h) => candidates.includes(normalize(h)));
-  return found || "";
+function autoDetectColumn(headers: string[], candidates: string[]): string {
+  return headers.find((h) => candidates.includes(normalize(h))) || "";
+}
+
+function parseDateValue(v: unknown): string | undefined {
+  if (!v) return undefined;
+  if (v instanceof Date) return isNaN(v.getTime()) ? undefined : v.toISOString();
+  const s = String(v).trim();
+  if (!s) return undefined;
+  const dmy = /^(\d{1,2})\/(\d{1,2})\/(\d{4})$/.exec(s);
+  if (dmy) {
+    const d = new Date(parseInt(dmy[3]), parseInt(dmy[2]) - 1, parseInt(dmy[1]));
+    if (!isNaN(d.getTime())) return d.toISOString();
+  }
+  const d = new Date(s);
+  return isNaN(d.getTime()) ? undefined : d.toISOString();
 }
 
 interface ParsedRow {
@@ -98,6 +125,8 @@ export function ExcelImportDialog({
     gerencia: "",
     responsavel: "",
   });
+  const [statusCol, setStatusCol] = useState("");
+  const [dataCol, setDataCol] = useState("");
   const [importing, setImporting] = useState(false);
   const [result, setResult] = useState<ImportResult | null>(null);
   const [parseError, setParseError] = useState<string | null>(null);
@@ -108,6 +137,8 @@ export function ExcelImportDialog({
     setHeaders([]);
     setRows([]);
     setMapping({ id: "", instalacao: "", sistema: "", equipamento: "", gerencia: "", responsavel: "" });
+    setStatusCol("");
+    setDataCol("");
     setImporting(false);
     setResult(null);
     setParseError(null);
@@ -121,48 +152,37 @@ export function ExcelImportDialog({
   async function handleFile(f: File) {
     setResult(null);
     setParseError(null);
-    const validExt = /\.(xlsx|xls)$/i.test(f.name);
-    if (!validExt) {
+    if (!/\.(xlsx|xls)$/i.test(f.name)) {
       toast.error("Formato inválido. Envie um arquivo .xlsx ou .xls");
       return;
     }
     setFile(f);
     try {
       const buf = await f.arrayBuffer();
-      const wb = XLSX.read(buf, { type: "array" });
+      const wb = XLSX.read(buf, { type: "array", cellDates: true });
       const sheetName = wb.SheetNames[0];
-      if (!sheetName) {
-        setParseError("Planilha inexistente no arquivo");
-        return;
-      }
+      if (!sheetName) { setParseError("Planilha inexistente no arquivo"); return; }
       const sheet = wb.Sheets[sheetName];
       const json = XLSX.utils.sheet_to_json<Record<string, unknown>>(sheet, { defval: "" });
-      if (json.length === 0) {
-        setParseError("Arquivo vazio ou sem linhas de dados");
-        return;
-      }
+      if (json.length === 0) { setParseError("Arquivo vazio ou sem linhas de dados"); return; }
       const hdrs = Object.keys(json[0]);
-      if (hdrs.length === 0) {
-        setParseError("Cabeçalhos ausentes na planilha");
-        return;
-      }
+      if (hdrs.length === 0) { setParseError("Cabeçalhos ausentes na planilha"); return; }
       const parsedRows: ParsedRow[] = json
         .map((raw, index) => ({ raw, index }))
         .filter(({ raw }) => Object.values(raw).some((v) => String(v).trim() !== ""));
-      if (parsedRows.length === 0) {
-        setParseError("Nenhuma linha com dados válidos");
-        return;
-      }
+      if (parsedRows.length === 0) { setParseError("Nenhuma linha com dados válidos"); return; }
       setHeaders(hdrs);
       setRows(parsedRows);
       setMapping({
-        id: autoDetectColumn(hdrs, "id"),
-        instalacao: autoDetectColumn(hdrs, "instalacao"),
-        sistema: autoDetectColumn(hdrs, "sistema"),
-        equipamento: autoDetectColumn(hdrs, "equipamento"),
-        gerencia: autoDetectColumn(hdrs, "gerencia"),
-        responsavel: autoDetectColumn(hdrs, "responsavel"),
+        id: autoDetectColumn(hdrs, AUTO_DETECT.id),
+        instalacao: autoDetectColumn(hdrs, AUTO_DETECT.instalacao),
+        sistema: autoDetectColumn(hdrs, AUTO_DETECT.sistema),
+        equipamento: autoDetectColumn(hdrs, AUTO_DETECT.equipamento),
+        gerencia: autoDetectColumn(hdrs, AUTO_DETECT.gerencia),
+        responsavel: autoDetectColumn(hdrs, AUTO_DETECT.responsavel),
       });
+      setStatusCol(autoDetectColumn(hdrs, STATUS_AUTO_DETECT));
+      setDataCol(autoDetectColumn(hdrs, DATE_AUTO_DETECT));
     } catch {
       setParseError("Não foi possível ler o arquivo. Verifique se não está corrompido.");
     }
@@ -191,6 +211,20 @@ export function ExcelImportDialog({
     return dupes;
   }, [rows, mapping.id]);
 
+  const extraColumns = useMemo<{ header: string; key: string }[]>(() => {
+    const used = new Set([...Object.values(mapping), statusCol, dataCol].filter(Boolean));
+    const seenKeys = new Set<string>();
+    const result: { header: string; key: string }[] = [];
+    for (const header of headers) {
+      if (used.has(header)) continue;
+      const key = slugifyKey(header);
+      if (!key || seenKeys.has(key)) continue;
+      seenKeys.add(key);
+      result.push({ header, key });
+    }
+    return result;
+  }, [headers, mapping, statusCol, dataCol]);
+
   const canImport = rows.length > 0 && missingRequired.length === 0 && !importing;
 
   async function runImport() {
@@ -202,10 +236,6 @@ export function ExcelImportDialog({
     const importedIds: string[] = [];
     const batchId = crypto.randomUUID();
     try {
-      // Decide which rows will actually be imported first (skipping
-      // duplicate ids), then reserve exactly that many sequential numbers in
-      // one shot — a single counter read-modify-write instead of one
-      // transaction per row.
       const validRows = rows.filter((row) => {
         const id = cellValue(row, mapping.id);
         if (id && seenIds.has(id)) {
@@ -222,28 +252,41 @@ export function ExcelImportDialog({
       let opsInBatch = 0;
       for (let i = 0; i < validRows.length; i += 1) {
         const row = validRows[i];
-        const id = cellValue(row, mapping.id);
-        const instalacao = cellValue(row, mapping.instalacao);
-        const sistema = cellValue(row, mapping.sistema);
-        const equipamento = cellValue(row, mapping.equipamento);
-        const gerencia = cellValue(row, mapping.gerencia);
-        const responsavel = cellValue(row, mapping.responsavel);
+
+        let status: RecordStatus = "aprovado";
+        if (statusCol) {
+          const raw = normalize(cellValue(row, statusCol));
+          status = STATUS_LABEL_TO_ENUM[raw] || "aprovado";
+        }
+
+        let createdAt = new Date().toISOString();
+        if (dataCol) {
+          const parsed = parseDateValue(row.raw[dataCol]);
+          if (parsed) createdAt = parsed;
+        }
+
+        const extraData: Record<string, string> = {};
+        for (const { header, key } of extraColumns) {
+          const val = cellValue(row, header);
+          if (val) extraData[key] = val;
+        }
 
         const newId = crypto.randomUUID();
         const record: Omit<AppRecord, "id"> = {
           recordNumber: recordNumbers[i],
-          status: "aprovado" as RecordStatus,
+          status,
           authorId: authorId || "import",
-          authorName: responsavel,
+          authorName: cellValue(row, mapping.responsavel),
           formId,
           data: {
-            instalacao,
-            sistema,
-            equipamento,
-            gerencia,
-            idPlanilha: id,
+            instalacao: cellValue(row, mapping.instalacao),
+            sistema: cellValue(row, mapping.sistema),
+            equipamento: cellValue(row, mapping.equipamento),
+            gerencia: cellValue(row, mapping.gerencia),
+            idPlanilha: cellValue(row, mapping.id),
+            ...extraData,
           },
-          createdAt: new Date().toISOString(),
+          createdAt,
           updatedAt: new Date().toISOString(),
           importBatchId: batchId,
         };
@@ -289,6 +332,8 @@ export function ExcelImportDialog({
     }
   }
 
+  const previewExtra = extraColumns.slice(0, 4);
+
   return (
     <Dialog open={open} onOpenChange={handleClose}>
       <DialogContent className="max-h-[90vh] w-[95vw] max-w-3xl overflow-y-auto">
@@ -331,7 +376,7 @@ export function ExcelImportDialog({
 
           {headers.length > 0 && (
             <>
-              <div className="flex flex-col gap-2">
+              <div className="flex flex-col gap-3">
                 <Label>Mapeamento de colunas</Label>
                 <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                   {REQUIRED_FIELDS.map((f) => (
@@ -348,14 +393,46 @@ export function ExcelImportDialog({
                         </SelectTrigger>
                         <SelectContent>
                           {headers.map((h) => (
-                            <SelectItem key={h} value={h}>
-                              {h}
-                            </SelectItem>
+                            <SelectItem key={h} value={h}>{h}</SelectItem>
                           ))}
                         </SelectContent>
                       </Select>
                     </div>
                   ))}
+                  <div className="flex flex-col gap-1">
+                    <span className="text-xs font-medium text-muted-foreground">Status</span>
+                    <Select
+                      value={statusCol || "__none__"}
+                      onValueChange={(v) => setStatusCol(v === "__none__" ? "" : v)}
+                    >
+                      <SelectTrigger>
+                        <SelectValue placeholder="Não importar" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="__none__">Não importar</SelectItem>
+                        {headers.map((h) => (
+                          <SelectItem key={h} value={h}>{h}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="flex flex-col gap-1">
+                    <span className="text-xs font-medium text-muted-foreground">Data de criação</span>
+                    <Select
+                      value={dataCol || "__none__"}
+                      onValueChange={(v) => setDataCol(v === "__none__" ? "" : v)}
+                    >
+                      <SelectTrigger>
+                        <SelectValue placeholder="Não importar" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="__none__">Não importar</SelectItem>
+                        {headers.map((h) => (
+                          <SelectItem key={h} value={h}>{h}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
                 </div>
                 {missingRequired.length > 0 && (
                   <p className="text-xs text-destructive">
@@ -365,6 +442,12 @@ export function ExcelImportDialog({
                 {duplicateIds.size > 0 && (
                   <p className="text-xs text-destructive">
                     IDs duplicados encontrados: {Array.from(duplicateIds).join(", ")}
+                  </p>
+                )}
+                {extraColumns.length > 0 && (
+                  <p className="text-xs text-muted-foreground">
+                    {extraColumns.length} coluna(s) adicional(is) detectada(s) e será(ão) importada(s):{" "}
+                    {extraColumns.map((c) => c.header).join(", ")}
                   </p>
                 )}
               </div>
@@ -381,6 +464,14 @@ export function ExcelImportDialog({
                         {REQUIRED_FIELDS.map((f) => (
                           <TableHead key={f.key}>{f.label}</TableHead>
                         ))}
+                        {statusCol && <TableHead>Status</TableHead>}
+                        {dataCol && <TableHead>Data</TableHead>}
+                        {previewExtra.map((c) => (
+                          <TableHead key={c.key}>{c.header}</TableHead>
+                        ))}
+                        {extraColumns.length > 4 && (
+                          <TableHead className="text-muted-foreground">+{extraColumns.length - 4}</TableHead>
+                        )}
                       </TableRow>
                     </TableHeader>
                     <TableBody>
@@ -389,6 +480,12 @@ export function ExcelImportDialog({
                           {REQUIRED_FIELDS.map((f) => (
                             <TableCell key={f.key}>{cellValue(r, mapping[f.key]) || "—"}</TableCell>
                           ))}
+                          {statusCol && <TableCell>{cellValue(r, statusCol) || "—"}</TableCell>}
+                          {dataCol && <TableCell>{cellValue(r, dataCol) || "—"}</TableCell>}
+                          {previewExtra.map((c) => (
+                            <TableCell key={c.key}>{cellValue(r, c.header) || "—"}</TableCell>
+                          ))}
+                          {extraColumns.length > 4 && <TableCell />}
                         </TableRow>
                       ))}
                     </TableBody>
