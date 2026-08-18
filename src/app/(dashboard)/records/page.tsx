@@ -38,7 +38,7 @@ import {
 } from "lucide-react";
 import { exportRecordsToExcel } from "@/lib/excel-export";
 import { db } from "@/lib/firebase";
-import { logsCol, recordsCol, writeAuditLog } from "@/lib/firestore-helpers";
+import { logsCol, recordsCol, usersCol, writeAuditLog } from "@/lib/firestore-helpers";
 import { useAuth } from "@/lib/auth-context";
 import {
   DEFAULT_FORM_ID,
@@ -154,8 +154,8 @@ export default function RecordsHistoryPage() {
   }, []);
 
   useEffect(() => {
-    const unsub = onSnapshot(collection(db, "users"), (snap) => {
-      setUsers(snap.docs.map((d) => d.data() as User));
+    const unsub = onSnapshot(usersCol(), (snap) => {
+      setUsers(snap.docs.map((d) => d.data()));
     });
     return () => unsub();
   }, []);
@@ -1111,7 +1111,9 @@ export default function RecordsHistoryPage() {
                 </DialogTitle>
                 {canChangeResponsible() ? (
                   <div className="flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
-                    <span>Responsável:</span>
+                    <span>
+                      Responsável atual: <strong className="font-medium text-foreground">{selected.authorName || "—"}</strong>
+                    </span>
                     <Select
                       value={selected.authorId}
                       onValueChange={(value) => updateResponsible(selected, value)}
