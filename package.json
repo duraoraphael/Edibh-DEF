@@ -8,7 +8,8 @@
     "start": "next start",
     "lint": "eslint",
     "typecheck": "tsc --noEmit",
-    "test": "playwright test"
+    "test": "npm run test:email && playwright test",
+    "test:email": "node --experimental-strip-types --test tests/email-inline.test.ts"
   },
   "dependencies": {
     "@radix-ui/react-avatar": "^1.2.1",
@@ -37,6 +38,7 @@
     "react": "19.2.4",
     "react-dom": "19.2.4",
     "recharts": "^3.9.2",
+    "sharp": "^0.35.3",
     "sonner": "^2.0.7",
     "tailwind-merge": "^3.6.0",
     "xlsx": "https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz"

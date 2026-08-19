@@ -202,7 +202,7 @@ export function renderEmailReportHtml({
             <img src="${logoLeftUrl}" alt="CIM — Centro Integrado de Monitoramento" width="150" height="40" style="display:block;border:0;outline:none;text-decoration:none;width:150px;height:40px;" />
           </td>
           <td valign="middle" align="center" style="padding:0 12px;">
-            <div style="font-family:Georgia,'Times New Roman',serif;color:${NAVY};font-size:21px;font-weight:bold;letter-spacing:0.02em;line-height:1.3;text-align:center;">Fluxo de Equipamentos Críticos</div>
+            <div style="font-family:Arial,Helvetica,sans-serif;color:${NAVY};font-size:15px;font-weight:bold;letter-spacing:0;line-height:1.2;text-align:center;white-space:nowrap;">Fluxo de Equipamentos Críticos</div>
           </td>
           <td width="160" valign="middle" align="right">
             <img src="${logoRightUrl}" alt="Petrobras" width="104" height="35" style="display:block;border:0;outline:none;text-decoration:none;width:104px;height:auto;" />

@@ -17,6 +17,14 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import {
   Select,
   SelectContent,
   SelectItem,
@@ -46,6 +54,7 @@ export default function EmailPage() {
   const [ccInput, setCcInput] = useState("");
   const [ccOpen, setCcOpen] = useState(false);
   const [subject, setSubject] = useState("");
+  const [previewOpen, setPreviewOpen] = useState(false);
   const [sending, setSending] = useState(false);
   const [downloading, setDownloading] = useState(false);
 
@@ -108,7 +117,7 @@ export default function EmailPage() {
   const images = useMemo(() => {
     if (!selected) return [];
     return (selected.attachments || [])
-      .filter((a) => /\.(png|jpe?g|gif|webp)$/i.test(a.name) || a.contentType?.startsWith("image/"))
+      .filter((a) => /\.(png|jpe?g|gif|webp|svg)$/i.test(a.name) || a.contentType?.startsWith("image/"))
       .map((a) => ({ name: a.name, url: a.url }));
   }, [selected]);
 
@@ -156,7 +165,7 @@ export default function EmailPage() {
     }
   }
 
-  async function sendViaOutlook() {
+  function reviewEmail() {
     if (!selected) {
       toast.error("Selecione um registro");
       return;
@@ -171,6 +180,11 @@ export default function EmailPage() {
       toast.error(`E-mail inválido: ${invalid.join(", ")}`);
       return;
     }
+    setPreviewOpen(true);
+  }
+
+  async function openOutlook() {
+    if (!selected) return;
     setSending(true);
     try {
       if (images.length) await downloadImages();
@@ -179,12 +193,11 @@ export default function EmailPage() {
         await navigator.clipboard.write([new ClipboardItem({ "text/html": blob })]);
         toast.message("Relatório copiado. Cole (Ctrl+V) no corpo do e-mail do Outlook.");
       } catch {
-        // clipboard indisponível; segue apenas com mailto
+        toast.message("Ao abrir o Outlook, cole o relatório no corpo do e-mail.");
       }
       const queryParts = [`subject=${encodeURIComponent(subject)}`];
       if (ccList.length) queryParts.push(`cc=${encodeURIComponent(ccList.join(","))}`);
-      const mailto = `mailto:${encodeURIComponent(to)}?${queryParts.join("&")}`;
-      window.location.href = mailto;
+      window.location.href = `mailto:${encodeURIComponent(to)}?${queryParts.join("&")}`;
       await addDoc(emailLogsCol(), {
         id: "",
         recordId: selected.id,
@@ -195,9 +208,11 @@ export default function EmailPage() {
         senderName: profile?.name || user?.email || undefined,
         createdAt: new Date().toISOString(),
       });
+      setPreviewOpen(false);
       toast.success("Abrindo o Outlook...");
-    } catch {
-      toast.error("Erro ao abrir o Outlook");
+    } catch (error) {
+      logFirestoreError({ fn: "EmailPage:openOutlook" }, error);
+      toast.error("Não foi possível abrir o Outlook");
     } finally {
       setSending(false);
     }
@@ -230,7 +245,7 @@ export default function EmailPage() {
       return;
     }
     const imgs = (selected.attachments || []).filter(
-      (a) => /\.(png|jpe?g|gif|webp)$/i.test(a.name) || a.contentType?.startsWith("image/")
+      (a) => /\.(png|jpe?g|gif|webp|svg)$/i.test(a.name) || a.contentType?.startsWith("image/")
     );
     if (imgs.length === 0) {
       toast.error("Este registro não possui imagens anexadas");
@@ -289,7 +304,7 @@ export default function EmailPage() {
     <div className="flex flex-col gap-6">
       <div>
         <h1 className="text-2xl font-semibold tracking-tight">Enviar por E-mail</h1>
-        <p className="text-sm text-muted-foreground">Envie registros preenchidos por e-mail via Outlook</p>
+        <p className="text-sm text-muted-foreground">Revise o relatório e abra a composição no Outlook</p>
       </div>
 
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
@@ -403,9 +418,9 @@ export default function EmailPage() {
               <Input id="subject" value={subject} onChange={(e) => setSubject(e.target.value)} />
             </div>
             <div className="flex flex-wrap gap-2">
-              <Button onClick={sendViaOutlook} disabled={sending || !selected}>
+              <Button onClick={reviewEmail} disabled={sending || !selected}>
                 <Mail className="h-4 w-4" />
-                Enviar pelo Outlook
+                Revisar e enviar
               </Button>
               <Button variant="outline" onClick={downloadImages} disabled={downloading || !selected}>
                 <Download className="h-4 w-4" />
@@ -415,21 +430,36 @@ export default function EmailPage() {
           </CardContent>
         </Card>
 
-        {selected && (
-          <Card className="lg:col-span-3">
-            <CardHeader>
-              <CardTitle>Prévia do relatório</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <iframe
-                title="Prévia do e-mail"
-                srcDoc={previewHtml}
-                className="h-150 w-full rounded-md border border-border bg-white"
-              />
-            </CardContent>
-          </Card>
-        )}
       </div>
+
+      <Dialog open={previewOpen} onOpenChange={setPreviewOpen}>
+        <DialogContent className="h-[94vh] max-w-[96vw] grid-rows-[auto_minmax(0,1fr)_auto] overflow-hidden">
+          <DialogHeader>
+            <DialogTitle>Prévia do e-mail</DialogTitle>
+            <DialogDescription>
+              Confira o relatório. Ao continuar, as imagens serão baixadas e o Outlook será aberto com destinatários e assunto preenchidos.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="min-h-0 overflow-auto rounded-md border border-border bg-[#f7f8fa] px-6 py-3">
+            <div className="relative mx-auto h-[1200px] w-[495px] max-w-full">
+              <iframe
+                title="Prévia antes de abrir o Outlook"
+                srcDoc={previewHtml}
+                className="absolute left-0 top-0 block h-[1600px] w-[660px] origin-top-left scale-75 border-0 bg-white shadow-sm"
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setPreviewOpen(false)} disabled={sending}>
+              Voltar
+            </Button>
+            <Button onClick={openOutlook} disabled={sending}>
+              <Mail className="h-4 w-4" />
+              {sending ? "Preparando..." : "Abrir Outlook"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
