@@ -3,6 +3,7 @@ import type { AppRecord, FormField } from "@/types";
 const NAVY = "#0b2540";
 const GREEN = "#0e7a4b";
 
+
 function formatFieldValue(v: unknown): string {
   if (v === undefined || v === null || v === "") return "—";
   if (Array.isArray(v)) return v.length ? v.join(", ") : "—";
@@ -189,6 +190,7 @@ export function renderEmailReportHtml({
   return `
 <!doctype html>
 <html>
+<head><meta charset="utf-8" /></head>
 <body style="margin:0;padding:0;background-color:#eef1f5;font-family:Arial,Helvetica,sans-serif;">
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color:#eef1f5;padding:24px 0;">
 <tr><td align="center">
@@ -199,7 +201,7 @@ export function renderEmailReportHtml({
       <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
         <tr>
           <td width="160" valign="middle" align="left">
-            <img src="${logoLeftUrl}" alt="CIM — Centro Integrado de Monitoramento" width="150" height="40" style="display:block;border:0;outline:none;text-decoration:none;width:150px;height:40px;" />
+            <img src="${logoLeftUrl}" alt="CIM - Centro Integrado de Monitoramento" width="150" height="40" style="display:block;border:0;outline:none;text-decoration:none;width:150px;height:auto;" />
           </td>
           <td valign="middle" align="center" style="padding:0 12px;">
             <div style="font-family:Georgia,'Times New Roman',serif;color:${NAVY};font-size:21px;font-weight:bold;letter-spacing:0.02em;line-height:1.3;text-align:center;">Fluxo de Equipamentos Críticos</div>
