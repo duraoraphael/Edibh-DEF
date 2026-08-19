@@ -86,7 +86,7 @@ export function renderEmailReportHtml({
   images = [],
   parameter,
   dataSource,
-  logoLeftUrl = "https://fluxocriticos.vercel.app/cim-compartilhado.png",
+  logoLeftUrl = "cim-compartilhado1.png",
   logoRightUrl = "https://fluxocriticos.vercel.app/petrobras.png",
 }: EmailTemplateData): string {
   const generalFields = fields
