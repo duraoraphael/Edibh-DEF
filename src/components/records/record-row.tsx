@@ -42,7 +42,7 @@ export function RecordRow({
       <TableCell className={cell}>{fieldValue(record, "equipamento") || "—"}</TableCell>
       <TableCell className={cell}>{fieldValue(record, "gerencia") || "—"}</TableCell>
       <TableCell className={cell}>
-        {record.createdAt ? new Date(record.createdAt).toLocaleDateString() : "—"}
+        {record.createdAt ? new Date(record.createdAt).toLocaleDateString("pt-BR") : "—"}
       </TableCell>
       <TableCell className={cell}>
         <StatusBadge status={record.status} />

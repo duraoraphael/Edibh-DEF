@@ -10,6 +10,14 @@ function formatFieldValue(v: unknown): string {
   return String(v);
 }
 
+function formatEmailFieldValue(field: FormField, value: unknown): string {
+  if (field.type === "data" && typeof value === "string") {
+    const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
+    if (match) return `${match[3]}/${match[2]}/${match[1]}`;
+  }
+  return formatFieldValue(value);
+}
+
 function escapeHtml(s: string): string {
   return s
     .replace(/&/g, "&amp;")
@@ -78,7 +86,7 @@ export function renderEmailReportHtml({
   images = [],
   parameter,
   dataSource,
-  logoLeftUrl = "https://fluxocriticos.vercel.app/cim-compartilhado.png",
+  logoLeftUrl = "nova_logo.png",
   logoRightUrl = "https://fluxocriticos.vercel.app/petrobras.png",
 }: EmailTemplateData): string {
   const generalFields = fields
@@ -96,14 +104,14 @@ export function renderEmailReportHtml({
     const b = generalFields[i + 1];
     dataCardsRows.push(`
     <tr>
-      ${dataCard(a.label, escapeHtml(formatFieldValue(record.data?.[a.key])), !b)}
-      ${b ? dataCard(b.label, escapeHtml(formatFieldValue(record.data?.[b.key])), false) : ""}
+      ${dataCard(a.label, escapeHtml(formatEmailFieldValue(a, record.data?.[a.key])), !b)}
+      ${b ? dataCard(b.label, escapeHtml(formatEmailFieldValue(b, record.data?.[b.key])), false) : ""}
     </tr>`);
   }
 
   const textSectionsHtml = textFields
     .map((f) => {
-      const value = escapeHtml(formatFieldValue(record.data?.[f.key])).replace(/\n/g, "<br/>");
+      const value = escapeHtml(formatEmailFieldValue(f, record.data?.[f.key])).replace(/\n/g, "<br/>");
       return `
       <tr>
         <td style="padding:18px 0 0;">
@@ -190,13 +198,13 @@ export function renderEmailReportHtml({
     <td style="background-color:#ffffff;padding:24px 32px;border-bottom:1px solid #e2e8f0;">
       <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
         <tr>
-          <td width="180" valign="middle" align="left">
+          <td width="160" valign="middle" align="left">
             <img src="${logoLeftUrl}" alt="CIM Compartilhado" width="160" height="53" style="display:block;border:0;outline:none;text-decoration:none;width:160px;height:auto;" />
           </td>
           <td valign="middle" align="center" style="padding:0 12px;">
             <div style="font-family:Georgia,'Times New Roman',serif;color:${NAVY};font-size:21px;font-weight:bold;letter-spacing:0.02em;line-height:1.3;text-align:center;">Fluxo de Equipamentos Críticos</div>
           </td>
-          <td width="130" valign="middle" align="right">
+          <td width="160" valign="middle" align="right">
             <img src="${logoRightUrl}" alt="Petrobras" width="104" height="35" style="display:block;border:0;outline:none;text-decoration:none;width:104px;height:auto;" />
           </td>
         </tr>

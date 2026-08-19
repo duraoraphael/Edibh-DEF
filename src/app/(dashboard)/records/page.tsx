@@ -503,7 +503,7 @@ export default function RecordsHistoryPage() {
       Sistema: fieldValue(r, "sistema") || "—",
       Equipamento: fieldValue(r, "equipamento") || "—",
       Gerência: fieldValue(r, "gerencia") || "—",
-      Data: r.createdAt ? new Date(r.createdAt).toLocaleDateString() : "—",
+      Data: r.createdAt ? new Date(r.createdAt).toLocaleDateString("pt-BR") : "—",
       Status: statusLabels[r.status],
       Responsável: r.authorName || "—",
     };
