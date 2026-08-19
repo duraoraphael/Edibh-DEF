@@ -86,7 +86,7 @@ export function renderEmailReportHtml({
   images = [],
   parameter,
   dataSource,
-  logoLeftUrl = "https://fluxocriticos.vercel.app/nova_logo.png",
+  logoLeftUrl = "https://fluxocriticos.vercel.app/logo-cim.png?v=2",
   logoRightUrl = "https://fluxocriticos.vercel.app/petrobras.png",
 }: EmailTemplateData): string {
   const generalFields = fields
@@ -199,7 +199,7 @@ export function renderEmailReportHtml({
       <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
         <tr>
           <td width="160" valign="middle" align="left">
-            <img src="${logoLeftUrl}" alt="CIM Compartilhado" width="160" height="53" style="display:block;border:0;outline:none;text-decoration:none;width:160px;height:auto;" />
+            <img src="${logoLeftUrl}" alt="CIM — Centro Integrado de Monitoramento" width="150" height="84" style="display:block;border:0;outline:none;text-decoration:none;width:150px;height:84px;object-fit:contain;" />
           </td>
           <td valign="middle" align="center" style="padding:0 12px;">
             <div style="font-family:Georgia,'Times New Roman',serif;color:${NAVY};font-size:21px;font-weight:bold;letter-spacing:0.02em;line-height:1.3;text-align:center;">Fluxo de Equipamentos Críticos</div>
@@ -258,7 +258,7 @@ export function renderEmailReportHtml({
       <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
         <tr>
           <td width="70" valign="top">
-            <img src="${logoLeftUrl}" alt="Logo" width="52" height="17" style="display:block;border:0;outline:none;text-decoration:none;width:52px;height:auto;opacity:0.85;" />
+            <img src="${logoLeftUrl}" alt="CIM" width="52" height="29" style="display:block;border:0;outline:none;text-decoration:none;width:52px;height:29px;object-fit:contain;opacity:0.85;" />
           </td>
           <td valign="top">
             <div style="font-family:Arial,Helvetica,sans-serif;font-size:12px;color:#374151;font-weight:bold;">Fluxo de Equipamentos Críticos</div>
