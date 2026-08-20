@@ -5,7 +5,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { doc, getDoc, onSnapshot, setDoc } from "firebase/firestore";
 import { getDownloadURL, ref, uploadBytesResumable } from "firebase/storage";
 import { toast } from "sonner";
-import { Loader2, Paperclip, UploadCloud, X } from "lucide-react";
+import { ChevronsUpDown, Loader2, Paperclip, Search, UploadCloud, X } from "lucide-react";
 import { db, storage } from "@/lib/firebase";
 import { useAuth } from "@/lib/auth-context";
 import {
@@ -25,6 +25,8 @@ import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Textarea } from "@/components/ui/textarea";
 import { Progress } from "@/components/ui/progress";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import {
   Select,
   SelectContent,
@@ -227,6 +229,12 @@ export default function NewRecordPage() {
     }
     setValues(next);
     if (debounceRef.current) clearTimeout(debounceRef.current);
+    if (isParameterField(field)) {
+      window.localStorage.setItem(
+        `edibh_draft_${draftId}`,
+        JSON.stringify({ values: next, attachments })
+      );
+    }
     debounceRef.current = setTimeout(() => persistDraft(next, attachments), 800);
   }
 
@@ -629,6 +637,162 @@ function resolveOptions(field: FormField, allFields?: FormField[], values?: Reco
   return sortOptions(field.options);
 }
 
+function isParameterField(field: FormField): boolean {
+  return field.label.trim().localeCompare("Parâmetro", "pt-BR", { sensitivity: "base" }) === 0;
+}
+
+function ParameterMultiSelect({
+  field,
+  value,
+  options,
+  onChange,
+}: {
+  field: FormField;
+  value: unknown;
+  options: string[];
+  onChange: (value: unknown) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState("");
+  const searchRef = useRef<HTMLInputElement>(null);
+  const optionRefs = useRef<Array<HTMLButtonElement | null>>([]);
+  const selected = Array.isArray(value)
+    ? value.filter((item): item is string => typeof item === "string")
+    : typeof value === "string" && value
+      ? [value]
+      : [];
+  const visibleTags = selected.slice(0, 2);
+  const hiddenCount = selected.length - visibleTags.length;
+  const normalizedQuery = query.trim().toLocaleLowerCase("pt-BR");
+  const filteredOptions = normalizedQuery
+    ? options.filter((option) => option.toLocaleLowerCase("pt-BR").includes(normalizedQuery))
+    : options;
+
+  function toggle(option: string) {
+    onChange(selected.includes(option) ? selected.filter((item) => item !== option) : [...selected, option]);
+  }
+
+  function remove(option: string) {
+    onChange(selected.filter((item) => item !== option));
+  }
+
+  return (
+    <div className="min-w-0 space-y-2">
+      <Popover open={open} onOpenChange={setOpen}>
+        <PopoverTrigger asChild>
+          <Button
+            id={field.id}
+            type="button"
+            variant="outline"
+            role="combobox"
+            aria-expanded={open}
+            aria-label={`${field.label}: ${selected.length} selecionados`}
+            className="h-10 w-full justify-between border-border bg-white px-3 font-normal shadow-sm hover:bg-white"
+          >
+            <span className={cn("truncate", selected.length === 0 && "text-muted-foreground")}>
+              {selected.length === 0
+                ? field.placeholder || "Selecione os parâmetros"
+                : `${selected.length} selecionado${selected.length === 1 ? "" : "s"}`}
+            </span>
+            <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 text-muted-foreground" aria-hidden="true" />
+          </Button>
+        </PopoverTrigger>
+        <PopoverContent
+          align="start"
+          collisionPadding={16}
+          className="w-[var(--radix-popover-trigger-width)] max-w-[calc(100vw-2rem)] overflow-hidden p-0 shadow-xl"
+          onOpenAutoFocus={(event) => {
+            event.preventDefault();
+            searchRef.current?.focus();
+          }}
+        >
+          <div className="flex items-center border-b border-border px-3">
+            <Search className="mr-2 h-4 w-4 shrink-0 text-muted-foreground" aria-hidden="true" />
+            <input
+              ref={searchRef}
+              value={query}
+              onChange={(event) => setQuery(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === "ArrowDown" && filteredOptions.length) {
+                  event.preventDefault();
+                  optionRefs.current[0]?.focus();
+                }
+              }}
+              placeholder="Pesquisar parâmetro..."
+              aria-label="Pesquisar parâmetro"
+              className="h-11 w-full bg-transparent py-3 text-sm outline-none placeholder:text-muted-foreground"
+            />
+          </div>
+          <div className="max-h-64 overflow-y-auto p-1" role="group" aria-label="Parâmetros disponíveis">
+            {filteredOptions.length === 0 && (
+              <p className="py-6 text-center text-sm text-muted-foreground">Nenhum parâmetro encontrado.</p>
+            )}
+            {filteredOptions.map((option, index) => {
+              const checked = selected.includes(option);
+              return (
+                <button
+                  ref={(node) => { optionRefs.current[index] = node; }}
+                  key={`${field.id}-parameter-${option}`}
+                  type="button"
+                  role="checkbox"
+                  aria-checked={checked}
+                  onClick={() => toggle(option)}
+                  onKeyDown={(event) => {
+                    if (event.key === "ArrowDown") {
+                      event.preventDefault();
+                      optionRefs.current[index + 1]?.focus();
+                    } else if (event.key === "ArrowUp") {
+                      event.preventDefault();
+                      if (index === 0) searchRef.current?.focus();
+                      else optionRefs.current[index - 1]?.focus();
+                    }
+                  }}
+                  className="flex min-h-9 w-full cursor-pointer items-center gap-2 rounded-lg px-2 py-1.5 text-left text-sm text-foreground outline-none transition-colors hover:bg-muted focus-visible:bg-primary-50 focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary/40"
+                >
+                  <Checkbox checked={checked} tabIndex={-1} aria-hidden="true" className="pointer-events-none" />
+                  <span className="flex-1">{option}</span>
+                </button>
+              );
+            })}
+          </div>
+          <div className="flex items-center justify-between gap-3 border-t border-border bg-muted/30 px-3 py-2.5">
+            <span className="text-xs font-medium text-muted-foreground" aria-live="polite">
+              {selected.length} selecionado{selected.length === 1 ? "" : "s"}
+            </span>
+            <div className="flex items-center gap-1.5">
+              <Button type="button" variant="ghost" size="sm" onClick={() => onChange([])} disabled={!selected.length}>
+                Limpar
+              </Button>
+              <Button type="button" size="sm" onClick={() => setOpen(false)}>
+                Concluir
+              </Button>
+            </div>
+          </div>
+        </PopoverContent>
+      </Popover>
+
+      {selected.length > 0 && (
+        <div className="flex min-w-0 flex-wrap items-center gap-1.5" aria-label="Parâmetros selecionados">
+          {visibleTags.map((option) => (
+            <Badge key={option} variant="success" className="max-w-full gap-1 py-1 pl-2.5 pr-1">
+              <span className="truncate">{option}</span>
+              <button
+                type="button"
+                onClick={() => remove(option)}
+                className="rounded-full p-0.5 text-primary-700 transition-colors hover:bg-primary/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
+                aria-label={`Remover ${option}`}
+              >
+                <X className="h-3 w-3" aria-hidden="true" />
+              </button>
+            </Badge>
+          ))}
+          {hiddenCount > 0 && <Badge variant="secondary">+{hiddenCount}</Badge>}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function DynamicField({
   field,
   value,
@@ -715,6 +879,9 @@ function DynamicField({
       );
     case "multipla_escolha": {
       const selected = Array.isArray(value) ? (value as string[]) : [];
+      if (isParameterField(field)) {
+        return <ParameterMultiSelect field={field} value={value} options={options} onChange={onChange} />;
+      }
       return (
         <div className="flex flex-col gap-1.5">
           {options.map((o, index) => (
