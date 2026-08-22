@@ -7,10 +7,8 @@ import { initializeAppCheck, ReCaptchaV3Provider } from "firebase/app-check";
 // Firebase client SDK config is not a secret (it's shipped in every browser
 // bundle either way; access is governed by Firestore/Storage security rules,
 // not by hiding these values — see firestore.rules / storage.rules). env
-// vars still take priority when set (so a key rotation on Vercel doesn't
-// need a code change), but each field also has a literal fallback so the
-// app works out of the box even when NEXT_PUBLIC_FIREBASE_* isn't set on
-// the deploying platform.
+// Values are provided at build time; next.config.ts also maps the legacy
+// FIREBASE_* names already used by this deployment into these public names.
 //
 // Each `process.env.NEXT_PUBLIC_*` reference below MUST stay a literal,
 // static property access — Next.js inlines these into the client bundle at

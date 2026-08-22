@@ -8,6 +8,25 @@ import type { NextConfig } from "next";
 // wildcard. Override via NEXT_PUBLIC_SITE_URL if a custom domain is added.
 const siteOrigin = process.env.NEXT_PUBLIC_SITE_URL || "https://fluxocriticos.vercel.app";
 
+// The Firebase Web config is public by design. Accept the legacy FIREBASE_*
+// names already configured in Vercel and expose them under the static
+// NEXT_PUBLIC_* names required by the browser bundle. This does not expose
+// Firebase Admin credentials; none are used here.
+const firebasePublicEnv = {
+  NEXT_PUBLIC_FIREBASE_API_KEY:
+    process.env.NEXT_PUBLIC_FIREBASE_API_KEY || process.env.FIREBASE_API_KEY || "",
+  NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN:
+    process.env.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN || process.env.FIREBASE_AUTH_DOMAIN || "",
+  NEXT_PUBLIC_FIREBASE_PROJECT_ID:
+    process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID || process.env.FIREBASE_PROJECT_ID || "",
+  NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET:
+    process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET || process.env.FIREBASE_STORAGE_BUCKET || "",
+  NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID:
+    process.env.NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID || process.env.FIREBASE_MESSAGING_SENDER_ID || "",
+  NEXT_PUBLIC_FIREBASE_APP_ID:
+    process.env.NEXT_PUBLIC_FIREBASE_APP_ID || process.env.FIREBASE_APP_ID || "",
+};
+
 const securityHeaders = [
   { key: "X-Frame-Options", value: "DENY" },
   { key: "X-Content-Type-Options", value: "nosniff" },
@@ -27,6 +46,7 @@ const securityHeaders = [
 const nextConfig: NextConfig = {
   poweredByHeader: false,
   productionBrowserSourceMaps: false,
+  env: firebasePublicEnv,
   // The email route reads these immutable assets at runtime. Explicit tracing
   // guarantees they are packaged with the Vercel serverless function.
   outputFileTracingIncludes: {
