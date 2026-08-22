@@ -30,7 +30,7 @@ export default function ForgotPasswordPage() {
       await resetPassword(email);
       setSent(true);
     } catch {
-      toast.error("Não foi possível enviar o e-mail. Verifique o endereço informado.");
+      toast.error("Muitas solicitações. Aguarde e tente novamente.");
     } finally {
       setSubmitting(false);
     }
@@ -53,7 +53,7 @@ export default function ForgotPasswordPage() {
               <div>
                 <h1 className="text-xl font-semibold tracking-tight">Verifique seu e-mail</h1>
                 <p className="mt-1 text-sm text-muted-foreground">
-                  Enviamos um link de redefinição de senha para <strong>{email}</strong>.
+                  Se houver uma conta para o endereço informado, ela receberá um link de redefinição.
                 </p>
               </div>
               <Link href="/login" className="w-full">

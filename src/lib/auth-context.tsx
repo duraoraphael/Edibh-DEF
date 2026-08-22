@@ -82,13 +82,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const check = await fetch("/api/auth/login-check", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ email }),
-    }).catch(() => null);
-    if (check && check.status === 429) {
+      body: JSON.stringify({ email, password }),
+    });
+    if (check.status === 429 || check.status === 503) {
       const retryAfter = check.headers.get("Retry-After");
       const err = new Error("rate-limited") as Error & { code: string };
       err.code = "auth/too-many-requests";
       throw retryAfter ? Object.assign(err, { retryAfter }) : err;
+    }
+    if (!check.ok) {
+      const err = new Error("invalid-credential") as Error & { code: string };
+      err.code = "auth/invalid-credential";
+      throw err;
     }
 
     const credential = await signInWithEmailAndPassword(auth, email, password);
@@ -110,6 +115,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const signUp = useCallback(async (name: string, email: string, password: string) => {
+    const gate = await fetch("/api/auth/abuse-check", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ flow: "signup", email }) });
+    if (!gate.ok) { const err = new Error("rate-limited") as Error & { code: string }; err.code = "auth/too-many-requests"; throw err; }
     const credential = await createUserWithEmailAndPassword(auth, email, password);
     await updateProfile(credential.user, { displayName: name });
     await setDoc(doc(db, "users", credential.user.uid), {
@@ -124,7 +131,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const resetPassword = useCallback(async (email: string) => {
-    await sendPasswordResetEmail(auth, email);
+    const gate = await fetch("/api/auth/abuse-check", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ flow: "reset", email }) });
+    if (!gate.ok) { const err = new Error("rate-limited") as Error & { code: string }; err.code = "auth/too-many-requests"; throw err; }
+    await sendPasswordResetEmail(auth, email).catch(() => undefined);
   }, []);
 
   const signOut = useCallback(async () => {

@@ -1,52 +1,46 @@
 import { NextRequest, NextResponse } from "next/server";
-import { checkLoginRateLimit } from "@/lib/rate-limit";
-import { isSameOrigin, rejectPreflight } from "@/lib/api-guards";
-import { isIP } from "node:net";
+import { clientIp, isSameOrigin, rejectPreflight } from "@/lib/api-guards";
+import { checkLoginLock, clearLoginFailures, fixedWindowLimit, recordLoginFailure } from "@/lib/rate-limit";
 
 export const OPTIONS = rejectPreflight;
 
-function clientIp(req: NextRequest): string {
-  // Vercel overwrites this header at its edge, unlike a caller-controlled
-  // forwarding chain. Fall back to x-forwarded-for for local/non-Vercel use.
-  const raw = req.headers.get("x-vercel-forwarded-for")
-    || req.headers.get("x-forwarded-for")?.split(",")[0]
-    || "";
-  const normalized = raw.trim().replace(/^\[|\]$/g, "");
-  return isIP(normalized) ? normalized.toLowerCase() : "unknown";
+function limited(retryAfterSeconds: number, unavailable = false) {
+  return NextResponse.json(
+    { error: unavailable ? "serviço temporariamente indisponível" : "Muitas tentativas. Tente novamente mais tarde." },
+    { status: unavailable ? 503 : 429, headers: { "Retry-After": String(retryAfterSeconds), "Cache-Control": "no-store" } }
+  );
 }
 
-/**
- * Called by the client immediately before attempting Firebase sign-in.
- * Enforces brute-force protection server-side (Upstash Redis) since the
- * actual Firebase Auth call happens client-side and can't be rate-limited
- * there. Not a bypass-proof gate on its own — Firebase Auth has its own
- * abuse throttling — but stops naive credential-stuffing against this app.
- */
 export async function POST(req: NextRequest) {
-  if (!isSameOrigin(req)) {
-    return NextResponse.json({ error: "origem não permitida" }, { status: 403 });
-  }
-
-  let email: unknown;
+  if (!isSameOrigin(req)) return NextResponse.json({ error: "origem não permitida" }, { status: 403 });
+  if (Number(req.headers.get("content-length") || 0) > 16_384) return NextResponse.json({ error: "corpo inválido" }, { status: 413 });
+  let email: string;
+  let password: string;
   try {
     const body = await req.json();
-    email = body?.email;
-  } catch {
-    return NextResponse.json({ error: "corpo inválido" }, { status: 400 });
-  }
-  if (typeof email !== "string" || !email.trim()) {
-    return NextResponse.json({ error: "email obrigatório" }, { status: 400 });
-  }
+    email = typeof body?.email === "string" ? body.email.trim().toLowerCase() : "";
+    password = typeof body?.password === "string" ? body.password : "";
+  } catch { return NextResponse.json({ error: "corpo inválido" }, { status: 400 }); }
+  if (!email || email.length > 254 || !password || password.length > 1024) return NextResponse.json({ error: "credenciais inválidas" }, { status: 400 });
 
   const ip = clientIp(req);
-  const result = await checkLoginRateLimit(ip, email);
-
-  if (!result.success) {
-    return NextResponse.json(
-      { error: "Muitas tentativas. Tente novamente em instantes." },
-      { status: 429, headers: { "Retry-After": String(result.retryAfterSeconds) } }
-    );
-  }
-
-  return NextResponse.json({ ok: true });
+  const ipLimit = await fixedWindowLimit("login:ip", ip, 30, "15 m");
+  if (!ipLimit.success) return limited(ipLimit.retryAfterSeconds, ipLimit.unavailable);
+  const lock = await checkLoginLock(ip, email);
+  if (!lock.success) return limited(lock.retryAfterSeconds, lock.unavailable);
+  const apiKey = process.env.NEXT_PUBLIC_FIREBASE_API_KEY;
+  if (!apiKey) return limited(60, true);
+  try {
+    const provider = await fetch(`https://identitytoolkit.googleapis.com/v1/accounts:signInWithPassword?key=${encodeURIComponent(apiKey)}`, {
+      method: "POST", headers: { "content-type": "application/json" },
+      body: JSON.stringify({ email, password, returnSecureToken: false }), cache: "no-store",
+    });
+    if (!provider.ok) {
+      const failure = await recordLoginFailure(ip, email);
+      if (!failure.success) return limited(failure.retryAfterSeconds, failure.unavailable);
+      return NextResponse.json({ error: "credenciais inválidas" }, { status: 401, headers: { "Cache-Control": "no-store" } });
+    }
+    await clearLoginFailures(ip, email);
+    return NextResponse.json({ ok: true }, { headers: { "Cache-Control": "no-store" } });
+  } catch { return limited(60, true); }
 }

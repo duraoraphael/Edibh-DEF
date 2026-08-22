@@ -44,9 +44,14 @@ async function toOutlookPng(input: Buffer): Promise<Buffer> {
     .toBuffer();
 }
 
-async function fetchImage(source: InlineImageSource): Promise<Buffer> {
+async function fetchImage(source: InlineImageSource, bearerToken?: string): Promise<Buffer> {
   const url = assertFirebaseStorageUrl(source.url);
-  const response = await fetch(url, { redirect: "error", cache: "no-store" });
+  if (bearerToken) url.searchParams.delete("token");
+  const response = await fetch(url, {
+    redirect: "error",
+    cache: "no-store",
+    headers: bearerToken ? { authorization: `Bearer ${bearerToken}` } : undefined,
+  });
   if (!response.ok) throw new Error(`Firebase Storage respondeu HTTP ${response.status} para ${source.name}.`);
   const advertisedLength = Number(response.headers.get("content-length") || 0);
   if (advertisedLength > MAX_INLINE_IMAGE_BYTES) throw new Error(`${source.name} excede 8 MB.`);
@@ -55,7 +60,7 @@ async function fetchImage(source: InlineImageSource): Promise<Buffer> {
   return bytes;
 }
 
-export async function buildInlineEmailImages(sources: InlineImageSource[]) {
+export async function buildInlineEmailImages(sources: InlineImageSource[], bearerToken?: string) {
   const logoSources = [
     { name: "logo-cim.png", cid: "logo-cim", file: "logo-cim.png" },
     { name: "logo-petrobras.png", cid: "logo-petrobras", file: "petrobras.png" },
@@ -72,7 +77,7 @@ export async function buildInlineEmailImages(sources: InlineImageSource[]) {
   }
 
   for (const [index, source] of sources.entries()) {
-    const png = await toOutlookPng(await fetchImage(source));
+    const png = await toOutlookPng(await fetchImage(source, bearerToken));
     totalBytes += png.length;
     if (totalBytes > MAX_EMAIL_IMAGE_BYTES) throw new Error("As imagens do e-mail excedem o limite seguro de 24 MB.");
     const cid = `registro-${index + 1}`;

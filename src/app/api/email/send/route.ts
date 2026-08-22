@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
-import { authenticateFirebaseRequest, firebaseBearerToken, isSameOrigin, rejectPreflight } from "@/lib/api-guards";
+import { authenticateFirebaseRequest, clientIp, firebaseBearerToken, isSameOrigin, rejectPreflight } from "@/lib/api-guards";
+import { fixedWindowLimit } from "@/lib/rate-limit";
 import { buildInlineEmailImages, type InlineImageSource } from "@/lib/email-inline-images";
 import { renderEmailReportHtml } from "@/components/email/email-report-template";
 import type { AppRecord, FormField } from "@/types";
@@ -45,6 +46,9 @@ export async function POST(request: NextRequest) {
   if (!(await maySendEmail(request, userId))) {
     return NextResponse.json({ error: "operação não autorizada" }, { status: 403 });
   }
+  const rate = await fixedWindowLimit("email", `${userId}:${clientIp(request)}`, 5, "10 m");
+  if (!rate.success) return NextResponse.json({ error: rate.unavailable ? "serviço temporariamente indisponível" : "limite excedido" }, { status: rate.unavailable ? 503 : 429, headers: { "Retry-After": String(rate.retryAfterSeconds) } });
+  if (Number(request.headers.get("content-length") || 0) > 1_048_576) return NextResponse.json({ error: "corpo muito grande" }, { status: 413 });
 
   const apiKey = process.env.RESEND_API_KEY;
   const from = process.env.EMAIL_FROM;
@@ -54,14 +58,14 @@ export async function POST(request: NextRequest) {
     const body = (await request.json()) as SendEmailBody;
     const to = Array.isArray(body.to) ? body.to.map((v) => v.trim()).filter(Boolean) : [];
     const cc = Array.isArray(body.cc) ? body.cc.map((v) => v.trim()).filter(Boolean) : [];
-    if (!to.length || [...to, ...cc].some((email) => !EMAIL_RE.test(email))) {
+    if (!to.length || to.length + cc.length > 20 || [...to, ...cc].some((email) => email.length > 254 || !EMAIL_RE.test(email))) {
       return NextResponse.json({ error: "destinatários inválidos" }, { status: 400 });
     }
-    if (!body.record?.id || !Array.isArray(body.fields) || !body.subject?.trim()) {
+    if (!body.record?.id || body.record.id.length > 200 || !Array.isArray(body.fields) || body.fields.length > 200 || !body.subject?.trim() || body.subject.length > 300 || !Array.isArray(body.images || []) || (body.images?.length || 0) > 20) {
       return NextResponse.json({ error: "dados do e-mail inválidos" }, { status: 400 });
     }
 
-    const inline = await buildInlineEmailImages(body.images || []);
+    const inline = await buildInlineEmailImages(body.images || [], firebaseBearerToken(request) || undefined);
     const html = renderEmailReportHtml({
       record: body.record,
       fields: body.fields,

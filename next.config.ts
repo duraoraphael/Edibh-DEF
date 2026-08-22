@@ -26,6 +26,7 @@ const securityHeaders = [
 
 const nextConfig: NextConfig = {
   poweredByHeader: false,
+  productionBrowserSourceMaps: false,
   // The email route reads these immutable assets at runtime. Explicit tracing
   // guarantees they are packaged with the Vercel serverless function.
   outputFileTracingIncludes: {

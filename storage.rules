@@ -7,6 +7,16 @@ service firebase.storage {
       return request.auth != null;
     }
 
+    function role() {
+      return isSignedIn()
+        ? firestore.get(/databases/(default)/documents/users/$(request.auth.uid)).data.role
+        : null;
+    }
+
+    function isPrivileged() {
+      return role() == 'admin' || role() == 'gerente';
+    }
+
     function isValidAttachment() {
       return request.resource.size < 20 * 1024 * 1024
         && request.resource.contentType.matches('image/(png|jpeg|gif|webp)|application/pdf|application/vnd.openxmlformats-officedocument.(wordprocessingml.document|spreadsheetml.sheet)|application/msword|application/vnd.ms-excel');
@@ -18,7 +28,7 @@ service firebase.storage {
     }
 
     match /attachments/{userId}/{allPaths=**} {
-      allow read: if isSignedIn();
+      allow read: if isSignedIn() && (request.auth.uid == userId || isPrivileged());
       allow write: if isSignedIn() && request.auth.uid == userId && isValidAttachment();
     }
 

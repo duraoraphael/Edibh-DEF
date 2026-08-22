@@ -67,18 +67,12 @@ interface LogErrorContext {
 }
 
 export function logFirestoreError(context: LogErrorContext, error: unknown) {
-  const err = error as { code?: string; message?: string; stack?: string };
-  console.error(
-    `[${context.fn}] falha${context.field ? ` no campo "${context.field}"` : ""}: ${err?.message || String(error)}`,
-    {
-      function: context.fn,
-      field: context.field,
-      code: err?.code,
-      message: err?.message,
-      stack: err?.stack,
-      payload: context.payload,
-    }
-  );
+  const err = error as { code?: string };
+  console.error("firestore.operation.failed", {
+    function: context.fn,
+    field: context.field,
+    code: err?.code || "unknown",
+  });
 }
 
 export const fieldTypeLabels: Record<FormFieldType, string> = {

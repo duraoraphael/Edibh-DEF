@@ -19,8 +19,8 @@ async function urlToDataUrl(url: string): Promise<string | null> {
       reader.onerror = reject;
       reader.readAsDataURL(blob);
     });
-  } catch (error) {
-    console.error("[pdf:urlToDataUrl] falha ao carregar imagem", { url, error });
+  } catch {
+    console.error("pdf.image.fetch.failed");
     return null;
   }
 }

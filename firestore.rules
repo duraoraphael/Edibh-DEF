@@ -1,164 +1,185 @@
-rules_version = '2';
+  rules_version = '2';
 
-service cloud.firestore {
-  match /databases/{database}/documents {
+  service cloud.firestore {
+    match /databases/{database}/documents {
 
-    function isSignedIn() {
-      return request.auth != null;
-    }
+      function isSignedIn() {
+        return request.auth != null;
+      }
 
-    function userDoc() {
-      return get(/databases/$(database)/documents/users/$(request.auth.uid));
-    }
+      function userDoc() {
+        return get(/databases/$(database)/documents/users/$(request.auth.uid));
+      }
 
-    function role() {
-      return isSignedIn() ? userDoc().data.role : null;
-    }
+      function role() {
+        return isSignedIn() ? userDoc().data.role : null;
+      }
 
-    function isAdmin() {
-      return role() == 'admin';
-    }
+      function isAdmin() {
+        return role() == 'admin';
+      }
 
-    function isGerente() {
-      return role() == 'gerente';
-    }
+      function isGerente() {
+        return role() == 'gerente';
+      }
 
-    function isTecnico() {
-      return role() == 'tecnico';
-    }
+      function isTecnico() {
+        return role() == 'tecnico';
+      }
 
-    function isAdminOrGerente() {
-      return isAdmin() || isGerente();
-    }
+      function isAdminOrGerente() {
+        return isAdmin() || isGerente();
+      }
 
-    function isOwner(authorId) {
-      return isSignedIn() && request.auth.uid == authorId;
-    }
+      function isOwner(authorId) {
+        return isSignedIn() && request.auth.uid == authorId;
+      }
 
-    // users: everyone signed in can read (for author names, avatars); only
-    // admin may change roles, self may update own non-role profile fields.
-    match /users/{userId} {
-      allow read: if isSignedIn();
-      allow create: if isSignedIn() && request.auth.uid == userId
-        && request.resource.data.keys().hasOnly([
-          'name', 'email', 'role', 'avatarUrl', 'department', 'lastActive', 'createdAt'
-        ])
-        && request.resource.data.role == 'visualizador'
-        && request.resource.data.email == request.auth.token.email;
-      allow update: if (isAdmin()
-          && request.resource.data.role in ['admin', 'gerente', 'tecnico', 'visualizador'])
-        || (isSignedIn() && request.auth.uid == userId
-            && request.resource.data.diff(resource.data).affectedKeys()
-              .hasOnly(['name', 'avatarUrl', 'department', 'lastActive']));
-      allow delete: if isAdmin();
-    }
+      // users: everyone signed in can read (for author names, avatars); only
+      // admin may change roles, self may update own non-role profile fields.
+      match /users/{userId} {
+        allow read: if isSignedIn();
+        allow create: if isSignedIn() && request.auth.uid == userId
+          && request.resource.data.keys().hasOnly([
+            'name', 'email', 'role', 'avatarUrl', 'department', 'lastActive', 'createdAt'
+          ])
+          && request.resource.data.role == 'visualizador'
+          && request.resource.data.email == request.auth.token.email;
+        allow update: if (isAdmin()
+            && request.resource.data.keys().hasOnly([
+              'name', 'email', 'role', 'avatarUrl', 'department', 'status', 'lastActive', 'lastLogin', 'createdAt'
+            ])
+            && request.resource.data.role in ['admin', 'gerente', 'tecnico', 'visualizador'])
+          || (isSignedIn() && request.auth.uid == userId
+              && request.resource.data.diff(resource.data).affectedKeys()
+                .hasOnly(['name', 'avatarUrl', 'department', 'lastActive']));
+        allow delete: if isAdmin();
+      }
 
-    // records: admin/gerente full access; tecnico may create and may only
-    // edit/delete records they authored; visualizador is read-only.
-    match /records/{recordId} {
-      allow read: if isSignedIn();
-      allow create: if isSignedIn() && role() != 'visualizador'
-        && request.resource.data.authorId == request.auth.uid;
-      allow update: if isAdminOrGerente()
-        || (isTecnico()
-          && resource.data.authorId == request.auth.uid
-          && request.resource.data.authorId == resource.data.authorId);
-      allow delete: if isAdmin();
+      // records: admin/gerente full access; tecnico may create and may only
+      // edit/delete records they authored; visualizador is read-only.
+      match /records/{recordId} {
+        allow read: if isSignedIn();
+        allow create: if isSignedIn() && role() != 'visualizador'
+          && request.resource.data.authorId == request.auth.uid
+          && request.resource.data.status in ['rascunho', 'pendente']
+          && request.resource.data.keys().hasOnly([
+            'recordNumber', 'description', 'category', 'status', 'authorId', 'authorName',
+            'attachments', 'formId', 'data', 'createdAt', 'updatedAt', 'importBatchId'
+          ]);
+        allow update: if isAdminOrGerente()
+          || (isTecnico()
+            && resource.data.authorId == request.auth.uid
+            && request.resource.data.authorId == resource.data.authorId
+            && request.resource.data.status in ['rascunho', 'pendente', 'reajuste']
+            && !request.resource.data.diff(resource.data).affectedKeys()
+              .hasAny(['recordNumber', 'deletedAt', 'deletedBy', 'deletedByName']));
+        allow delete: if isAdmin();
 
-      match /updates/{updateId} {
-        function ownsParentRecord() {
-          return isTecnico()
-            && get(/databases/$(database)/documents/records/$(recordId)).data.authorId == request.auth.uid;
+        match /updates/{updateId} {
+          function ownsParentRecord() {
+            return isTecnico()
+              && get(/databases/$(database)/documents/records/$(recordId)).data.authorId == request.auth.uid;
+          }
+          allow read: if isSignedIn();
+          allow create, update, delete: if isAdminOrGerente() || ownsParentRecord();
         }
-        allow read: if isSignedIn();
-        allow create, update, delete: if isAdminOrGerente() || ownsParentRecord();
       }
-    }
 
-    // approvals: doc id == record id, and every approval doc carries its own
-    // `authorId` (denormalized from the parent record) so this check never
-    // needs get() on another document — safe even when the approval and its
-    // parent record are written in the same atomic transaction, where a
-    // get() could race against the record's own pending write. Admin/gerente
-    // always act on approvals; a tecnico may create/update the approval for
-    // a record they authored (needed so their own submission and their own
-    // status changes succeed).
-    match /approvals/{approvalId} {
-      allow read: if isSignedIn();
-      allow create: if (isAdminOrGerente() || (isTecnico()
-          && request.resource.data.authorId == request.auth.uid))
-        && request.resource.data.authorId == getAfter(/databases/$(database)/documents/records/$(approvalId)).data.authorId;
-      allow update: if (isAdminOrGerente()
-          && request.resource.data.authorId == getAfter(/databases/$(database)/documents/records/$(approvalId)).data.authorId)
-        || (isTecnico()
-          && resource.data.authorId == request.auth.uid
-          && request.resource.data.authorId == resource.data.authorId);
-      allow delete: if isAdmin();
-    }
-
-    // form definitions: admin/gerente manage fields; everyone reads (needed
-    // to render the "new record" form).
-    match /formFields/{formId} {
-      allow read: if isSignedIn();
-      allow write: if isAdminOrGerente();
-
-      match /updates/{updateId} {
+      // approvals: doc id == record id, and every approval doc carries its own
+      // `authorId` (denormalized from the parent record) so this check never
+      // needs get() on another document — safe even when the approval and its
+      // parent record are written in the same atomic transaction, where a
+      // get() could race against the record's own pending write. Admin/gerente
+      // always act on approvals; a tecnico may create/update the approval for
+      // a record they authored (needed so their own submission and their own
+      // status changes succeed).
+      match /approvals/{approvalId} {
         allow read: if isSignedIn();
-        allow write: if isAdmin();
+        allow create: if (isAdminOrGerente() || (isTecnico()
+            && request.resource.data.authorId == request.auth.uid
+            && request.resource.data.status == 'pendente'
+            && !request.resource.data.keys().hasAny(['reviewerId', 'reviewerName'])))
+          && request.resource.data.authorId == getAfter(/databases/$(database)/documents/records/$(approvalId)).data.authorId;
+        allow update: if isAdminOrGerente()
+          && request.resource.data.authorId == resource.data.authorId
+          && request.resource.data.authorId == getAfter(/databases/$(database)/documents/records/$(approvalId)).data.authorId
+          && request.resource.data.status in ['pendente', 'aprovado', 'rejeitado', 'reajuste'];
+        allow delete: if isAdmin();
       }
-    }
 
-    // audit log: append-only by any signed-in user (actions are always tied
-    // to the authenticated actor); no client may edit or delete history.
-    match /logs/{logId} {
-      allow read: if isSignedIn();
-      allow create: if isSignedIn()
-        && request.resource.data.actorId == request.auth.uid
-        && request.resource.data.actorRole == role()
-        && request.resource.data.actorName == userDoc().data.name
-        && request.resource.data.action is string
-        && request.resource.data.action.size() <= 100
-        && request.resource.data.keys().hasOnly([
-          'action', 'recordId', 'recordNumber', 'statusBefore', 'statusAfter',
-          'actorId', 'actorName', 'actorRole', 'detail', 'createdAt'
-        ]);
-      allow update, delete: if false;
-    }
+      // form definitions: admin/gerente manage fields; everyone reads (needed
+      // to render the "new record" form).
+      match /formFields/{formId} {
+        allow read: if isSignedIn();
+        allow write: if isAdminOrGerente();
 
-    match /emailLogs/{logId} {
-      allow read: if isAdminOrGerente();
-      allow create: if isSignedIn()
-        && request.resource.data.senderId == request.auth.uid
-        && request.resource.data.subject is string
-        && request.resource.data.subject.size() <= 300;
-      allow update, delete: if false;
-    }
+        match /updates/{updateId} {
+          allow read: if isSignedIn();
+          allow write: if isAdmin();
+        }
+      }
 
-    // notifications: any signed-in user may create (fan-out to recipients);
-    // recipients read only their own and may only flip the `read` flag.
-    match /notifications/{notificationId} {
-      allow read: if isSignedIn() && resource.data.userId == request.auth.uid;
-      allow create: if isSignedIn()
-        && request.resource.data.actorId == request.auth.uid
-        && request.resource.data.read == false
-        && request.resource.data.type in ['aprovacao_pendente', 'aprovado', 'rejeitado', 'reajuste', 'criado', 'geral']
-        && request.resource.data.title is string
-        && request.resource.data.title.size() <= 200;
-      allow update: if isSignedIn() && resource.data.userId == request.auth.uid
-        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['read'])
-        && request.resource.data.read is bool;
-      allow delete: if false;
-    }
+      // audit log: append-only by any signed-in user (actions are always tied
+      // to the authenticated actor); no client may edit or delete history.
+      match /logs/{logId} {
+        allow read: if isAdminOrGerente();
+        allow create: if isSignedIn()
+          && request.resource.data.actorId == request.auth.uid
+          && request.resource.data.actorRole == role()
+          && request.resource.data.actorName == userDoc().data.name
+          && request.resource.data.action is string
+          && request.resource.data.action.size() <= 100
+          && request.resource.data.keys().hasOnly([
+            'action', 'recordId', 'recordNumber', 'statusBefore', 'statusAfter',
+            'actorId', 'actorName', 'actorRole', 'detail', 'createdAt'
+          ]);
+        allow update, delete: if false;
+      }
 
-    // shared, per-year sequence counters used to generate record numbers
-    // ("recordCounter_2026", "recordCounter_2027", ...). Any signed-in
-    // non-visualizador user may advance a record counter (needed so a
-    // tecnico's own submission can atomically claim the next sequential
-    // number); every other setting stays admin/gerente-only.
-    match /settings/{settingId} {
-      allow read: if isSignedIn();
-      allow write: if isAdminOrGerente()
-        || (settingId.matches('recordCounter(_[0-9]{4})?') && isSignedIn() && role() != 'visualizador');
+      match /emailLogs/{logId} {
+        allow read: if isAdminOrGerente();
+        allow create: if isAdminOrGerente()
+          && request.resource.data.senderId == request.auth.uid
+          && request.resource.data.subject is string
+          && request.resource.data.subject.size() <= 300;
+        allow update, delete: if false;
+      }
+
+      // notifications: any signed-in user may create (fan-out to recipients);
+      // recipients read only their own and may only flip the `read` flag.
+      match /notifications/{notificationId} {
+        allow read: if isSignedIn() && resource.data.userId == request.auth.uid;
+        allow create: if isSignedIn()
+          && request.resource.data.actorId == request.auth.uid
+          && request.resource.data.read == false
+          && request.resource.data.type in ['aprovacao_pendente', 'aprovado', 'rejeitado', 'reajuste', 'criado', 'geral']
+          && request.resource.data.title is string
+          && request.resource.data.title.size() <= 200;
+        allow update: if isSignedIn() && resource.data.userId == request.auth.uid
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['read'])
+          && request.resource.data.read is bool;
+        allow delete: if false;
+      }
+
+      // shared, per-year sequence counters used to generate record numbers
+      // ("recordCounter_2026", "recordCounter_2027", ...). Any signed-in
+      // non-visualizador user may advance a record counter (needed so a
+      // tecnico's own submission can atomically claim the next sequential
+      // number); every other setting stays admin/gerente-only.
+      match /settings/{settingId} {
+        allow read: if isSignedIn();
+        allow create: if isAdminOrGerente()
+          || (settingId.matches('recordCounter(_[0-9]{4})?') && isSignedIn() && role() != 'visualizador'
+            && request.resource.data.keys().hasOnly(['value', 'year'])
+            && request.resource.data.value is int && request.resource.data.value >= 0);
+        allow update: if isAdminOrGerente()
+          || (settingId.matches('recordCounter(_[0-9]{4})?') && isSignedIn() && role() != 'visualizador'
+            && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['value'])
+            && request.resource.data.value is int
+            && request.resource.data.value > resource.data.value
+            && request.resource.data.value <= resource.data.value + 1000);
+        allow delete: if isAdminOrGerente();
+      }
     }
   }
-}

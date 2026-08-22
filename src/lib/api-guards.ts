@@ -1,4 +1,12 @@
 import { NextResponse, type NextRequest } from "next/server";
+import { isIP } from "node:net";
+
+export function clientIp(req: NextRequest): string {
+  const vercelIp = req.headers.get("x-vercel-forwarded-for")?.split(",")[0]?.trim();
+  const localIp = process.env.NODE_ENV !== "production" ? req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() : "";
+  const raw = (vercelIp || localIp || "unknown").replace(/^\[|\]$/g, "");
+  return isIP(raw) ? raw.toLowerCase() : "unknown";
+}
 
 /**
  * Rejects requests whose Origin (or, absent that, Referer) header doesn't
@@ -70,6 +78,20 @@ export async function authenticateFirebaseRequest(req: NextRequest): Promise<str
   } catch {
     return null;
   }
+}
+
+export async function firebaseRequestRole(req: NextRequest, userId: string): Promise<string | null> {
+  const token = firebaseBearerToken(req);
+  const projectId = process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID;
+  if (!token || !projectId) return null;
+  try {
+    const response = await fetch(`https://firestore.googleapis.com/v1/projects/${encodeURIComponent(projectId)}/databases/(default)/documents/users/${encodeURIComponent(userId)}`, {
+      headers: { authorization: `Bearer ${token}` }, cache: "no-store",
+    });
+    if (!response.ok) return null;
+    const document = (await response.json()) as { fields?: { role?: { stringValue?: string } } };
+    return document.fields?.role?.stringValue || null;
+  } catch { return null; }
 }
 
 export function firebaseBearerToken(req: NextRequest): string | null {
