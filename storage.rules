@@ -7,19 +7,24 @@ service firebase.storage {
       return request.auth != null;
     }
 
-    function isValidUpload() {
+    function isValidAttachment() {
       return request.resource.size < 20 * 1024 * 1024
-        && request.resource.contentType.matches('image/.*|application/pdf|application/vnd.openxmlformats-officedocument.*|application/msword|application/vnd.ms-excel');
+        && request.resource.contentType.matches('image/(png|jpeg|gif|webp)|application/pdf|application/vnd.openxmlformats-officedocument.(wordprocessingml.document|spreadsheetml.sheet)|application/msword|application/vnd.ms-excel');
+    }
+
+    function isValidAvatar() {
+      return request.resource.size < 5 * 1024 * 1024
+        && request.resource.contentType.matches('image/(png|jpeg|webp)');
     }
 
     match /attachments/{userId}/{allPaths=**} {
       allow read: if isSignedIn();
-      allow write: if isSignedIn() && request.auth.uid == userId && isValidUpload();
+      allow write: if isSignedIn() && request.auth.uid == userId && isValidAttachment();
     }
 
     match /avatars/{userId} {
       allow read: if isSignedIn();
-      allow write: if isSignedIn() && request.auth.uid == userId && isValidUpload();
+      allow write: if isSignedIn() && request.auth.uid == userId && isValidAvatar();
     }
   }
 }

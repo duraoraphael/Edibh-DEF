@@ -135,6 +135,7 @@ export type NotificationType =
 
 export interface AppNotification {
   id: string;
+  actorId?: string;
   userId: string;
   type: NotificationType;
   title: string;

@@ -1,8 +1,19 @@
 import { NextRequest, NextResponse } from "next/server";
 import { checkLoginRateLimit } from "@/lib/rate-limit";
 import { isSameOrigin, rejectPreflight } from "@/lib/api-guards";
+import { isIP } from "node:net";
 
 export const OPTIONS = rejectPreflight;
+
+function clientIp(req: NextRequest): string {
+  // Vercel overwrites this header at its edge, unlike a caller-controlled
+  // forwarding chain. Fall back to x-forwarded-for for local/non-Vercel use.
+  const raw = req.headers.get("x-vercel-forwarded-for")
+    || req.headers.get("x-forwarded-for")?.split(",")[0]
+    || "";
+  const normalized = raw.trim().replace(/^\[|\]$/g, "");
+  return isIP(normalized) ? normalized.toLowerCase() : "unknown";
+}
 
 /**
  * Called by the client immediately before attempting Firebase sign-in.
@@ -27,7 +38,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "email obrigatório" }, { status: 400 });
   }
 
-  const ip = req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || "unknown";
+  const ip = clientIp(req);
   const result = await checkLoginRateLimit(ip, email);
 
   if (!result.success) {

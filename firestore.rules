@@ -39,11 +39,17 @@ service cloud.firestore {
     // admin may change roles, self may update own non-role profile fields.
     match /users/{userId} {
       allow read: if isSignedIn();
-      allow create: if isSignedIn() && request.auth.uid == userId;
-      allow update: if isAdmin()
+      allow create: if isSignedIn() && request.auth.uid == userId
+        && request.resource.data.keys().hasOnly([
+          'name', 'email', 'role', 'avatarUrl', 'department', 'lastActive', 'createdAt'
+        ])
+        && request.resource.data.role == 'visualizador'
+        && request.resource.data.email == request.auth.token.email;
+      allow update: if (isAdmin()
+          && request.resource.data.role in ['admin', 'gerente', 'tecnico', 'visualizador'])
         || (isSignedIn() && request.auth.uid == userId
-            && request.resource.data.role == resource.data.role
-            && request.resource.data.status == resource.data.status);
+            && request.resource.data.diff(resource.data).affectedKeys()
+              .hasOnly(['name', 'avatarUrl', 'department', 'lastActive']));
       allow delete: if isAdmin();
     }
 
@@ -79,8 +85,14 @@ service cloud.firestore {
     // status changes succeed).
     match /approvals/{approvalId} {
       allow read: if isSignedIn();
-      allow create, update: if isAdminOrGerente()
-        || (isSignedIn() && role() != 'visualizador' && request.resource.data.authorId == request.auth.uid);
+      allow create: if (isAdminOrGerente() || (isTecnico()
+          && request.resource.data.authorId == request.auth.uid))
+        && request.resource.data.authorId == getAfter(/databases/$(database)/documents/records/$(approvalId)).data.authorId;
+      allow update: if (isAdminOrGerente()
+          && request.resource.data.authorId == getAfter(/databases/$(database)/documents/records/$(approvalId)).data.authorId)
+        || (isTecnico()
+          && resource.data.authorId == request.auth.uid
+          && request.resource.data.authorId == resource.data.authorId);
       allow delete: if isAdmin();
     }
 
@@ -100,13 +112,25 @@ service cloud.firestore {
     // to the authenticated actor); no client may edit or delete history.
     match /logs/{logId} {
       allow read: if isSignedIn();
-      allow create: if isSignedIn() && request.resource.data.actorId == request.auth.uid;
+      allow create: if isSignedIn()
+        && request.resource.data.actorId == request.auth.uid
+        && request.resource.data.actorRole == role()
+        && request.resource.data.actorName == userDoc().data.name
+        && request.resource.data.action is string
+        && request.resource.data.action.size() <= 100
+        && request.resource.data.keys().hasOnly([
+          'action', 'recordId', 'recordNumber', 'statusBefore', 'statusAfter',
+          'actorId', 'actorName', 'actorRole', 'detail', 'createdAt'
+        ]);
       allow update, delete: if false;
     }
 
     match /emailLogs/{logId} {
       allow read: if isAdminOrGerente();
-      allow create: if isSignedIn() && request.resource.data.senderId == request.auth.uid;
+      allow create: if isSignedIn()
+        && request.resource.data.senderId == request.auth.uid
+        && request.resource.data.subject is string
+        && request.resource.data.subject.size() <= 300;
       allow update, delete: if false;
     }
 
@@ -114,8 +138,15 @@ service cloud.firestore {
     // recipients read only their own and may only flip the `read` flag.
     match /notifications/{notificationId} {
       allow read: if isSignedIn() && resource.data.userId == request.auth.uid;
-      allow create: if isSignedIn();
-      allow update: if isSignedIn() && resource.data.userId == request.auth.uid;
+      allow create: if isSignedIn()
+        && request.resource.data.actorId == request.auth.uid
+        && request.resource.data.read == false
+        && request.resource.data.type in ['aprovacao_pendente', 'aprovado', 'rejeitado', 'reajuste', 'criado', 'geral']
+        && request.resource.data.title is string
+        && request.resource.data.title.size() <= 200;
+      allow update: if isSignedIn() && resource.data.userId == request.auth.uid
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['read'])
+        && request.resource.data.read is bool;
       allow delete: if false;
     }
 

@@ -230,8 +230,10 @@ export default function EmailPage() {
 
   async function fetchAsBlob(url: string, filename: string): Promise<Blob | null> {
     try {
+      const token = await user?.getIdToken();
+      if (!token) return null;
       const proxied = `/api/download?url=${encodeURIComponent(url)}&filename=${encodeURIComponent(filename)}`;
-      const res = await fetch(proxied);
+      const res = await fetch(proxied, { headers: { Authorization: `Bearer ${token}` } });
       if (!res.ok) return null;
       return await res.blob();
     } catch {

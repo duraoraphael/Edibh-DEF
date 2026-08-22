@@ -48,3 +48,30 @@ export function rejectPreflight(req: NextRequest): NextResponse {
     { status: isSameOrigin(req) ? 405 : 403 }
   );
 }
+
+/** Verify a Firebase ID token without introducing an Admin credential. */
+export async function authenticateFirebaseRequest(req: NextRequest): Promise<string | null> {
+  const token = firebaseBearerToken(req);
+  const apiKey = process.env.NEXT_PUBLIC_FIREBASE_API_KEY;
+  if (!token || !apiKey) return null;
+  try {
+    const response = await fetch(
+      `https://identitytoolkit.googleapis.com/v1/accounts:lookup?key=${encodeURIComponent(apiKey)}`,
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ idToken: token }),
+        cache: "no-store",
+      }
+    );
+    if (!response.ok) return null;
+    const payload = (await response.json()) as { users?: Array<{ localId?: string }> };
+    return payload.users?.[0]?.localId || null;
+  } catch {
+    return null;
+  }
+}
+
+export function firebaseBearerToken(req: NextRequest): string | null {
+  return req.headers.get("authorization")?.match(/^Bearer ([^\s]+)$/)?.[1] || null;
+}

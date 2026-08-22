@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { rejectPreflight } from "@/lib/api-guards";
+import { authenticateFirebaseRequest, firebaseBearerToken, isSameOrigin, rejectPreflight } from "@/lib/api-guards";
 import { buildInlineEmailImages, type InlineImageSource } from "@/lib/email-inline-images";
 import { renderEmailReportHtml } from "@/components/email/email-report-template";
 import type { AppRecord, FormField } from "@/types";
@@ -19,24 +19,32 @@ interface SendEmailBody {
   images?: InlineImageSource[];
 }
 
-async function authenticate(request: NextRequest): Promise<string | null> {
-  const token = request.headers.get("authorization")?.match(/^Bearer (.+)$/)?.[1];
-  const apiKey = process.env.NEXT_PUBLIC_FIREBASE_API_KEY;
-  if (!token || !apiKey) return null;
-  const response = await fetch(`https://identitytoolkit.googleapis.com/v1/accounts:lookup?key=${encodeURIComponent(apiKey)}`, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ idToken: token }),
-    cache: "no-store",
-  });
-  if (!response.ok) return null;
-  const payload = (await response.json()) as { users?: Array<{ localId?: string }> };
-  return payload.users?.[0]?.localId || null;
+async function maySendEmail(request: NextRequest, userId: string): Promise<boolean> {
+  const token = firebaseBearerToken(request);
+  const projectId = process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID;
+  if (!token || !projectId) return false;
+  try {
+    const response = await fetch(
+      `https://firestore.googleapis.com/v1/projects/${encodeURIComponent(projectId)}/databases/(default)/documents/users/${encodeURIComponent(userId)}`,
+      { headers: { authorization: `Bearer ${token}` }, cache: "no-store" }
+    );
+    if (!response.ok) return false;
+    const document = (await response.json()) as { fields?: { role?: { stringValue?: string } } };
+    return ["admin", "gerente"].includes(document.fields?.role?.stringValue || "");
+  } catch {
+    return false;
+  }
 }
 
 export async function POST(request: NextRequest) {
-  const userId = await authenticate(request);
+  if (!isSameOrigin(request)) {
+    return NextResponse.json({ error: "origem não permitida" }, { status: 403 });
+  }
+  const userId = await authenticateFirebaseRequest(request);
   if (!userId) return NextResponse.json({ error: "sessão inválida" }, { status: 401 });
+  if (!(await maySendEmail(request, userId))) {
+    return NextResponse.json({ error: "operação não autorizada" }, { status: 403 });
+  }
 
   const apiKey = process.env.RESEND_API_KEY;
   const from = process.env.EMAIL_FROM;
@@ -68,14 +76,13 @@ export async function POST(request: NextRequest) {
       cache: "no-store",
     });
     const providerPayload = (await providerResponse.json()) as { id?: string; message?: string; name?: string };
-    console.info("email.provider.response", { status: providerResponse.status, payload: providerPayload, userId, recordId: body.record.id });
+    console.info("email.provider.response", { status: providerResponse.status, accepted: Boolean(providerPayload.id) });
     if (!providerResponse.ok || !providerPayload.id) {
       return NextResponse.json({ error: providerPayload.message || "provedor recusou o e-mail" }, { status: 502 });
     }
     return NextResponse.json({ id: providerPayload.id });
   } catch (error) {
-    const message = error instanceof Error ? error.message : "falha ao preparar e-mail";
-    console.error("email.send.failed", { message, userId });
-    return NextResponse.json({ error: message }, { status: 422 });
+    console.error("email.send.failed", { kind: error instanceof Error ? error.name : "unknown" });
+    return NextResponse.json({ error: "não foi possível preparar o e-mail" }, { status: 422 });
   }
 }

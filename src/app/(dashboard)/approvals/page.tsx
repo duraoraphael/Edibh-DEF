@@ -119,6 +119,18 @@ export default function ApprovalsPage() {
     });
     await batch.commit();
 
+    // The write is confirmed at this point. Remove the resolved item
+    // immediately instead of waiting for the network snapshot round-trip;
+    // onSnapshot remains the source of truth and will reconcile afterward.
+    setApprovals((current) => current.filter((item) => item.id !== approval.id));
+    setSelectedIds((current) => {
+      if (!current.has(approval.id)) return current;
+      const next = new Set(current);
+      next.delete(approval.id);
+      return next;
+    });
+    setExpanded((current) => current === approval.recordId ? null : current);
+
     // Audit log + notification are best-effort side effects: the decision
     // itself already succeeded above, so a failure here (transient network,
     // etc.) must never surface as "the approval failed" to the reviewer.
@@ -324,9 +336,9 @@ export default function ApprovalsPage() {
                               const v = rec.data?.[f.key];
                               const text = Array.isArray(v) ? v.join(", ") : v === undefined || v === null || v === "" ? "—" : String(v);
                               return (
-                                <div key={f.id} className="rounded-lg border border-border p-2">
+                                <div key={f.id} className="min-w-0 rounded-lg border border-border p-2">
                                   <p className="text-[11px] font-medium text-muted-foreground">{f.label}</p>
-                                  <p className="whitespace-pre-wrap text-xs">{text}</p>
+                                  <p className="whitespace-pre-wrap break-words [overflow-wrap:anywhere] text-xs">{text}</p>
                                 </div>
                               );
                             })}

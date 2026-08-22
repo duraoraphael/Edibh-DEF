@@ -1,11 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
-import { isSameOrigin, rejectPreflight } from "@/lib/api-guards";
+import { authenticateFirebaseRequest, isSameOrigin, rejectPreflight } from "@/lib/api-guards";
 
 export const OPTIONS = rejectPreflight;
 
 export async function GET(req: NextRequest) {
   if (!isSameOrigin(req)) {
     return NextResponse.json({ error: "origem não permitida" }, { status: 403 });
+  }
+  if (!(await authenticateFirebaseRequest(req))) {
+    return NextResponse.json({ error: "sessão inválida" }, { status: 401 });
   }
 
   const url = req.nextUrl.searchParams.get("url");

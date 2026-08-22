@@ -9,7 +9,7 @@ import {
   FirestoreDataConverter,
   DocumentData,
 } from "firebase/firestore";
-import { db } from "./firebase";
+import { auth, db } from "./firebase";
 import type {
   User,
   AppRecord,
@@ -73,11 +73,14 @@ export async function createNotifications(
   userIds: string[],
   data: Omit<AppNotification, "id" | "userId" | "createdAt" | "read">
 ): Promise<void> {
+  const actorId = auth.currentUser?.uid;
+  if (!actorId) return;
   const targets = Array.from(new Set(userIds.filter(Boolean)));
   await Promise.all(
     targets.map(async (userId) => {
       const payload = {
         id: "",
+        actorId,
         userId,
         read: false,
         createdAt: new Date().toISOString(),
@@ -102,24 +105,17 @@ export interface AuditActor {
   role?: string;
 }
 
-/**
- * Append-only audit-log write. Centralizes the shape of every audit entry so
- * all events (create/edit/approve/delete/restore/status/login/...) record the
- * same fields: actor, actor role, timestamp, action, affected record, flow
- * number, status before/after and optional observations.
- */
-export async function writeAuditLog(
-  actor: AuditActor,
-  entry: {
-    action: string;
-    recordId?: string;
-    recordNumber?: string;
-    statusBefore?: string;
-    statusAfter?: string;
-    detail?: string;
-  }
-): Promise<void> {
-  const payload: Omit<LogEntry, "id"> & { id: string } = {
+export interface AuditEntryInput {
+  action: string;
+  recordId?: string;
+  recordNumber?: string;
+  statusBefore?: string;
+  statusAfter?: string;
+  detail?: string;
+}
+
+export function buildAuditLogData(actor: AuditActor, entry: AuditEntryInput): LogEntry {
+  const payload: LogEntry = {
     id: "",
     action: entry.action,
     recordId: entry.recordId ?? "",
@@ -132,9 +128,20 @@ export async function writeAuditLog(
     detail: entry.detail,
     createdAt: new Date().toISOString(),
   };
-  // Firestore rejects `undefined`; strip optional fields that weren't provided.
-  const clean = Object.fromEntries(
-    Object.entries(payload).filter(([, v]) => v !== undefined)
+  return Object.fromEntries(
+    Object.entries(payload).filter(([, value]) => value !== undefined)
   ) as unknown as LogEntry;
-  await addDoc(logsCol(), clean);
+}
+
+/**
+ * Append-only audit-log write. Centralizes the shape of every audit entry so
+ * all events (create/edit/approve/delete/restore/status/login/...) record the
+ * same fields: actor, actor role, timestamp, action, affected record, flow
+ * number, status before/after and optional observations.
+ */
+export async function writeAuditLog(
+  actor: AuditActor,
+  entry: AuditEntryInput
+): Promise<void> {
+  await addDoc(logsCol(), buildAuditLogData(actor, entry));
 }

@@ -61,12 +61,8 @@ export default function LoginPage() {
       router.replace("/dashboard");
     } catch (error) {
       const code = (error as { code?: string })?.code;
-      const message = (error as { message?: string })?.message;
-      // Always log the raw Firebase code/message — the toast below is
-      // intentionally generic for credential errors (so it never confirms
-      // whether an email exists), but the real cause must stay visible for
-      // debugging instead of being silently swallowed.
-      console.error("[LoginPage] signIn failed:", code, message);
+      // Keep logs free of provider messages, which can contain user input.
+      console.error("[LoginPage] signIn failed", { code: code || "unknown" });
       toast.error(loginErrorMessage(code));
     } finally {
       setSubmitting(false);

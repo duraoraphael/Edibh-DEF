@@ -3,7 +3,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
-  addDoc,
   collection,
   deleteDoc,
   doc,
@@ -37,7 +36,7 @@ import {
 } from "lucide-react";
 import { exportRecordsToExcel } from "@/lib/excel-export";
 import { db } from "@/lib/firebase";
-import { logsCol, recordsCol, usersCol, writeAuditLog } from "@/lib/firestore-helpers";
+import { buildAuditLogData, logsCol, recordsCol, usersCol, writeAuditLog } from "@/lib/firestore-helpers";
 import { useAuth } from "@/lib/auth-context";
 import {
   DEFAULT_FORM_ID,
@@ -141,6 +140,7 @@ export default function RecordsHistoryPage() {
   const [updatingStatus, setUpdatingStatus] = useState(false);
   const [users, setUsers] = useState<User[]>([]);
   const [updatingResponsible, setUpdatingResponsible] = useState(false);
+  const selectedId = selected?.id;
 
   useEffect(() => {
     const unsub = onSnapshot(doc(db, "formFields", DEFAULT_FORM_ID), (snap) => {
@@ -172,17 +172,17 @@ export default function RecordsHistoryPage() {
     // The audit log panel is only rendered while `selected` is set (see the
     // dialog below), so stale log data left in state while the dialog is
     // closed is harmless — avoids a synchronous setState on every close.
-    if (!selected) return;
+    if (!selectedId) return;
     const unsub = onSnapshot(
-      query(logsCol(), where("recordId", "==", selected.id), orderBy("createdAt", "desc")),
+      query(logsCol(), where("recordId", "==", selectedId), orderBy("createdAt", "desc")),
       (snap) => {
         setLogs(snap.docs.map((d) => d.data()));
-        setLogsLoadedForId(selected.id);
+        setLogsLoadedForId(selectedId);
       },
-      () => setLogsLoadedForId(selected.id)
+      () => setLogsLoadedForId(selectedId)
     );
     return () => unsub();
-  }, [selected]);
+  }, [selectedId]);
 
   const logsLoading = !!selected && logsLoadedForId !== selected.id;
 
@@ -191,9 +191,9 @@ export default function RecordsHistoryPage() {
   }, [selected]);
 
   useEffect(() => {
-    if (!selected) return;
+    if (!selectedId) return;
     const unsub = onSnapshot(
-      query(collection(db, "records", selected.id, "updates"), orderBy("createdAt", "desc")),
+      query(collection(db, "records", selectedId, "updates"), orderBy("createdAt", "desc")),
       (snap) => {
         setFlowUpdates(
           snap.docs.map((d) => ({
@@ -206,7 +206,7 @@ export default function RecordsHistoryPage() {
       }
     );
     return () => unsub();
-  }, [selected]);
+  }, [selectedId]);
 
   async function addFlowUpdate() {
     if (!selected || !canEdit(selected)) return;
@@ -217,12 +217,13 @@ export default function RecordsHistoryPage() {
     }
     setSavingFlowUpdate(true);
     try {
-      await addDoc(collection(db, "records", selected.id, "updates"), {
+      const batch = writeBatch(db);
+      batch.set(doc(collection(db, "records", selected.id, "updates")), {
         text,
         authorName: profile?.name || user?.email || "Usuário",
         createdAt: serverTimestamp(),
       });
-      await writeAuditLog(
+      batch.set(doc(logsCol()), buildAuditLogData(
         { uid: user?.uid, name: profile?.name || user?.email || undefined, role: profile?.role },
         {
           action: "Atualização do fluxo adicionada",
@@ -232,7 +233,8 @@ export default function RecordsHistoryPage() {
           statusAfter: selected.status,
           detail: text,
         }
-      );
+      ));
+      await batch.commit();
       setNewFlowUpdateText("");
       toast.success("Atualização adicionada");
     } catch {
@@ -261,8 +263,9 @@ export default function RecordsHistoryPage() {
     }
     setSavingUpdateEdit(true);
     try {
-      await updateDoc(doc(db, "records", selected.id, "updates", editingUpdateId), { text });
-      await writeAuditLog(
+      const batch = writeBatch(db);
+      batch.update(doc(db, "records", selected.id, "updates", editingUpdateId), { text });
+      batch.set(doc(logsCol()), buildAuditLogData(
         { uid: user?.uid, name: profile?.name || user?.email || undefined, role: profile?.role },
         {
           action: "Atualização do fluxo editada",
@@ -272,7 +275,8 @@ export default function RecordsHistoryPage() {
           statusAfter: selected.status,
           detail: text,
         }
-      );
+      ));
+      await batch.commit();
       toast.success("Atualização editada");
       cancelEditFlowUpdate();
     } catch {
@@ -286,8 +290,9 @@ export default function RecordsHistoryPage() {
     if (!selected || !canEdit(selected)) return;
     setDeletingUpdateId(u.id);
     try {
-      await deleteDoc(doc(db, "records", selected.id, "updates", u.id));
-      await writeAuditLog(
+      const batch = writeBatch(db);
+      batch.delete(doc(db, "records", selected.id, "updates", u.id));
+      batch.set(doc(logsCol()), buildAuditLogData(
         { uid: user?.uid, name: profile?.name || user?.email || undefined, role: profile?.role },
         {
           action: "Atualização do fluxo excluída",
@@ -297,7 +302,8 @@ export default function RecordsHistoryPage() {
           statusAfter: selected.status,
           detail: u.text,
         }
-      );
+      ));
+      await batch.commit();
       toast.success("Atualização excluída");
     } catch {
       toast.error("Erro ao excluir atualização");
@@ -322,9 +328,7 @@ export default function RecordsHistoryPage() {
       const batch = writeBatch(db);
       batch.update(doc(db, "records", r.id), { authorId: next.id, authorName: next.name || next.email, updatedAt: now });
       batch.set(doc(db, "approvals", r.id), { authorId: next.id, updatedAt: now }, { merge: true });
-      await batch.commit();
-      setSelected((prev) => (prev && prev.id === r.id ? { ...prev, authorId: next.id, authorName: next.name || next.email } : prev));
-      await writeAuditLog(
+      batch.set(doc(logsCol()), buildAuditLogData(
         { uid: user?.uid, name: profile?.name || user?.email || undefined, role: profile?.role },
         {
           action: "Responsável do registro alterado",
@@ -334,7 +338,9 @@ export default function RecordsHistoryPage() {
           statusAfter: r.status,
           detail: `${r.authorName || r.authorId} → ${next.name || next.email}`,
         }
-      );
+      ));
+      await batch.commit();
+      setSelected((prev) => (prev && prev.id === r.id ? { ...prev, authorId: next.id, authorName: next.name || next.email } : prev));
       toast.success("Responsável alterado");
     } catch (error) {
       logFirestoreError({ fn: "updateResponsible", payload: { recordId: r.id, newAuthorId } }, error);
@@ -369,28 +375,21 @@ export default function RecordsHistoryPage() {
         },
         { merge: true }
       );
+      batch.set(doc(logsCol()), buildAuditLogData(
+        { uid: user?.uid, name: profile?.name || user?.email || undefined, role: profile?.role },
+        {
+          action: `Status alterado para ${statusLabels[newStatus]}`,
+          recordId: r.id,
+          recordNumber: r.recordNumber,
+          statusBefore: r.status,
+          statusAfter: newStatus,
+        }
+      ));
       await batch.commit();
 
       setSelected((prev) => (prev && prev.id === r.id ? { ...prev, status: newStatus } : prev));
       toast.success(`Status alterado para ${statusLabels[newStatus]}`);
 
-      // Best-effort: the status change above already succeeded, so a
-      // failure here (transient network, etc.) must never make an
-      // otherwise-successful change look like it failed.
-      try {
-        await writeAuditLog(
-          { uid: user?.uid, name: profile?.name || user?.email || undefined, role: profile?.role },
-          {
-            action: `Status alterado para ${statusLabels[newStatus]}`,
-            recordId: r.id,
-            recordNumber: r.recordNumber,
-            statusBefore: r.status,
-            statusAfter: newStatus,
-          }
-        );
-      } catch (error) {
-        logFirestoreError({ fn: "updateRecordStatus:writeAuditLog" }, error);
-      }
     } catch (error) {
       logFirestoreError({ fn: "updateRecordStatus", payload: { recordId: r.id, newStatus } }, error);
       toast.error("Erro ao alterar status");
@@ -1086,9 +1085,9 @@ export default function RecordsHistoryPage() {
                     <h3 className="mb-2 text-sm font-semibold">Campos preenchidos</h3>
                     <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                       {Object.entries(selected.data || {}).map(([key, value]) => (
-                        <div key={key} className="rounded-lg border border-border p-3">
+                        <div key={key} className="min-w-0 overflow-hidden rounded-lg border border-border p-3">
                           <p className="text-xs font-medium text-muted-foreground">{key}</p>
-                          <p className="whitespace-pre-wrap text-sm">
+                          <p className="whitespace-pre-wrap break-words [overflow-wrap:anywhere] text-sm">
                             {Array.isArray(value) ? value.join(", ") : String(value ?? "—")}
                           </p>
                         </div>
