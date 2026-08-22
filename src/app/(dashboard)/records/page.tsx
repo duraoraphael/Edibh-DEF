@@ -27,7 +27,6 @@ import {
   Download,
   Eye,
   FileSpreadsheet,
-  ListOrdered,
   MoreVertical,
   Pencil,
   RotateCcw,
@@ -43,9 +42,8 @@ import { useAuth } from "@/lib/auth-context";
 import {
   DEFAULT_FORM_ID,
   fieldValue,
-  formatRecordNumber,
   logFirestoreError,
-  recordNumberSortValue,
+  compareRecordNumbers,
   statusLabels,
 } from "@/lib/forms";
 import { ExcelImportDialog } from "@/components/records/excel-import-dialog";
@@ -116,8 +114,8 @@ export default function RecordsHistoryPage() {
   const [equipamentoFilter, setEquipamentoFilter] = useState<string>(ALL);
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
-  const [sortKey, setSortKey] = useState<SortKey>("createdAt");
-  const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
+  const [sortKey, setSortKey] = useState<SortKey>("recordNumber");
+  const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
   const [page, setPage] = useState(1);
   const [selected, setSelected] = useState<AppRecord | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<AppRecord | null>(null);
@@ -129,8 +127,6 @@ export default function RecordsHistoryPage() {
   const [bulkPermanentDeleting, setBulkPermanentDeleting] = useState(false);
   const [view, setView] = useState<"ativos" | "removidos">("ativos");
   const [dense, setDense] = useState(false);
-  const [renumberOpen, setRenumberOpen] = useState(false);
-  const [renumbering, setRenumbering] = useState(false);
   const [formFields, setFormFields] = useState<FormField[]>([]);
   const [logs, setLogs] = useState<LogEntry[]>([]);
   const [logsLoadedForId, setLogsLoadedForId] = useState<string | null>(null);
@@ -458,14 +454,13 @@ export default function RecordsHistoryPage() {
     const fieldKeys: SortKey[] = ["instalacao", "sistema", "equipamento", "gerencia"];
     const sortValue = (r: AppRecord): string => {
       if (fieldKeys.includes(sortKey)) return fieldValue(r, sortKey);
-      // "NNN/YYYY" doesn't sort correctly as a plain string across a year
-      // boundary (e.g. "999/2026" > "100/2027" lexicographically); reorder
-      // to "YYYY-NNN" so string comparison matches chronological order.
-      if (sortKey === "recordNumber") return recordNumberSortValue(r.recordNumber);
       return (r as unknown as Record<string, string>)[sortKey] || "";
     };
     list = [...list].sort((a, b) => {
-      const cmp = sortValue(a).localeCompare(sortValue(b));
+      const cmp =
+        sortKey === "recordNumber"
+          ? compareRecordNumbers(a.recordNumber, b.recordNumber)
+          : sortValue(a).localeCompare(sortValue(b), "pt-BR", { numeric: true, sensitivity: "base" });
       return sortDir === "asc" ? cmp : -cmp;
     });
     return list;
@@ -698,50 +693,6 @@ export default function RecordsHistoryPage() {
     });
   }
 
-  async function renumberAll() {
-    setRenumbering(true);
-    try {
-      const ordered = [...submitted].sort((a, b) => (a.createdAt || "").localeCompare(b.createdAt || ""));
-      let batch = writeBatch(db);
-      let opsInBatch = 0;
-      // Sequence resets per calendar year (of createdAt), matching the
-      // "XXX/ANO" numbering scheme used for new flows.
-      const seqByYear = new Map<number, number>();
-      for (const r of ordered) {
-        const year = r.createdAt ? new Date(r.createdAt).getFullYear() : new Date().getFullYear();
-        const seq = (seqByYear.get(year) || 0) + 1;
-        seqByYear.set(year, seq);
-        const recordNumber = formatRecordNumber(seq, year);
-        if (r.recordNumber !== recordNumber) {
-          batch.update(doc(db, "records", r.id), { recordNumber, updatedAt: new Date().toISOString() });
-          opsInBatch += 1;
-        }
-        if (opsInBatch >= 400) {
-          await batch.commit();
-          batch = writeBatch(db);
-          opsInBatch = 0;
-        }
-      }
-      if (opsInBatch > 0) await batch.commit();
-
-      for (const [year, seq] of seqByYear) {
-        await setDoc(doc(db, "settings", `recordCounter_${year}`), { value: seq, year }, { merge: true });
-      }
-
-      await writeAuditLog(
-        { uid: user?.uid, name: profile?.name || user?.email || undefined, role: profile?.role },
-        { action: "Renumeração geral de IDs", detail: "Alteração de número do fluxo (renumeração sequencial por ano)" }
-      );
-
-      toast.success("IDs renumerados em ordem");
-      setRenumberOpen(false);
-    } catch {
-      toast.error("Erro ao renumerar os IDs");
-    } finally {
-      setRenumbering(false);
-    }
-  }
-
   function toggleSelectAllOnPage() {
     setSelectedIds((prev) => {
       const next = new Set(prev);
@@ -807,12 +758,6 @@ export default function RecordsHistoryPage() {
             <Button variant="destructive" onClick={() => setBulkPermanentDeleteOpen(true)}>
               <Trash2 className="h-4 w-4" />
               Remover dos dashboards ({selectedIds.size})
-            </Button>
-          )}
-          {view === "ativos" && canDelete() && (
-            <Button variant="outline" onClick={() => setRenumberOpen(true)}>
-              <ListOrdered className="h-4 w-4" />
-              Renumerar IDs
             </Button>
           )}
           {view === "ativos" && (
@@ -1372,25 +1317,6 @@ export default function RecordsHistoryPage() {
         </DialogContent>
       </Dialog>
 
-      <Dialog open={renumberOpen} onOpenChange={(o) => !renumbering && setRenumberOpen(o)}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Renumerar IDs</DialogTitle>
-          </DialogHeader>
-          <p className="text-sm text-muted-foreground">
-            Isso vai reordenar todos os {submitted.length} registro(s) submetidos por data de criação e renumerar
-            sequencialmente (0001, 0002...), sem pular ou repetir números. Esta ação não pode ser desfeita.
-          </p>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setRenumberOpen(false)} disabled={renumbering}>
-              Cancelar
-            </Button>
-            <Button onClick={renumberAll} disabled={renumbering}>
-              {renumbering ? "Renumerando..." : "Renumerar"}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
 
       <ExcelImportDialog
         open={importOpen}

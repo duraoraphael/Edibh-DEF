@@ -2,6 +2,7 @@ import { doc, getDoc, getDocs, query, runTransaction, setDoc, where, writeBatch 
 import { db } from "./firebase";
 import { recordsCol } from "./firestore-helpers";
 import type { AppRecord, FormField, FormFieldType, RecordStatus, UserRole } from "@/types";
+export { compareRecordNumbers } from "./record-number";
 
 export const statusLabels: Record<RecordStatus, string> = {
   rascunho: "Rascunho",

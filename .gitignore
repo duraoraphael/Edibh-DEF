@@ -37,6 +37,9 @@ yarn-error.log*
 # vercel
 .vercel
 
+# Local Firestore/Storage recovery snapshots may contain production data.
+/recovery/
+
 # typescript
 *.tsbuildinfo
 next-env.d.ts

@@ -57,7 +57,7 @@ async function fetchImage(source: InlineImageSource): Promise<Buffer> {
 
 export async function buildInlineEmailImages(sources: InlineImageSource[]) {
   const logoSources = [
-    { name: "logo-cim.png", cid: "logo-cim", file: "logo-cim-email.png" },
+    { name: "logo-cim.png", cid: "logo-cim", file: "logo-cim.png" },
     { name: "logo-petrobras.png", cid: "logo-petrobras", file: "petrobras.png" },
   ];
   const attachments: InlineAttachment[] = [];

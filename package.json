@@ -8,8 +8,9 @@
     "start": "next start",
     "lint": "eslint",
     "typecheck": "tsc --noEmit",
-    "test": "npm run test:email && playwright test",
-    "test:email": "node --experimental-strip-types --test tests/email-inline.test.ts"
+    "test": "npm run test:email && npm run test:record-number && playwright test",
+    "test:email": "node --experimental-strip-types --test tests/email-inline.test.ts",
+    "test:record-number": "node --experimental-strip-types --test tests/record-number.test.ts"
   },
   "dependencies": {
     "@radix-ui/react-avatar": "^1.2.1",
