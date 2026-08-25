@@ -75,6 +75,27 @@ export function logFirestoreError(context: LogErrorContext, error: unknown) {
   });
 }
 
+/** Converts Firebase failures into useful messages without exposing credentials. */
+export function getFirebaseErrorMessage(error: unknown, fallback: string): string {
+  const err = error as { code?: unknown; message?: unknown } | null;
+  const code = typeof err?.code === "string" ? err.code : "";
+  const knownMessages: Record<string, string> = {
+    "permission-denied": "Você não tem permissão para concluir esta operação.",
+    "firestore/permission-denied": "Você não tem permissão para concluir esta operação.",
+    unauthenticated: "Sua sessão expirou. Faça login novamente.",
+    "firestore/unauthenticated": "Sua sessão expirou. Faça login novamente.",
+    unavailable: "O serviço está temporariamente indisponível. Tente novamente.",
+    "firestore/unavailable": "O serviço está temporariamente indisponível. Tente novamente.",
+    "not-found": "O registro solicitado não foi encontrado.",
+    "firestore/not-found": "O registro solicitado não foi encontrado.",
+    "invalid-argument": "Os dados enviados são inválidos. Revise os campos e tente novamente.",
+    "firestore/invalid-argument": "Os dados enviados são inválidos. Revise os campos e tente novamente.",
+  };
+  if (knownMessages[code]) return knownMessages[code];
+  if (typeof err?.message === "string" && err.message.trim()) return err.message;
+  return fallback;
+}
+
 export const fieldTypeLabels: Record<FormFieldType, string> = {
   texto: "Texto",
   numero: "Número",

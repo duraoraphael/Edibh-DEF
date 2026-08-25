@@ -12,6 +12,7 @@ import {
   DEFAULT_FORM_ID,
   applyMask,
   createRecordWithSequentialNumber,
+  getFirebaseErrorMessage,
   logFirestoreError,
   recordNumberExists,
   saveRecordWithFixedNumber,
@@ -439,7 +440,7 @@ export default function NewRecordPage() {
       router.push("/records");
     } catch (error) {
       logFirestoreError({ fn: "handleSubmit" }, error);
-      toast.error("Erro ao enviar registro. Veja o console para detalhes.");
+      toast.error(getFirebaseErrorMessage(error, "Não foi possível enviar o registro."));
     } finally {
       setSubmitting(false);
     }

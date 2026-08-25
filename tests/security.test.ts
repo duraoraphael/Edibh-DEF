@@ -32,5 +32,12 @@ test("Firebase rules retain deny-by-default and protected role/attachment checks
   assert.doesNotMatch(firestore, /allow\s+(read|write)\s*:\s*if\s+true/);
   assert.match(firestore, /request\.resource\.data\.role == 'visualizador'/);
   assert.match(firestore, /allow update: if isAdminOrGerente\(\)/);
+  assert.match(firestore, /resource\.data\.status == 'rascunho'/);
+  assert.match(firestore, /request\.resource\.data\.status == 'pendente'/);
+  assert.match(firestore, /request\.resource\.data\.recordNumber\.matches/);
+  assert.doesNotMatch(
+    firestore,
+    /allow update: if isAdminOrGerente\(\)\s*&& request\.resource\.data\.authorId == resource\.data\.authorId/
+  );
   assert.match(storage, /request\.auth\.uid == userId \|\| isPrivileged\(\)/);
 });

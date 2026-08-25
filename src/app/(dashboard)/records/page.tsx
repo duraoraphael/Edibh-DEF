@@ -41,6 +41,7 @@ import { useAuth } from "@/lib/auth-context";
 import {
   DEFAULT_FORM_ID,
   fieldValue,
+  getFirebaseErrorMessage,
   logFirestoreError,
   compareRecordNumbers,
   statusLabels,
@@ -344,7 +345,7 @@ export default function RecordsHistoryPage() {
       toast.success("Responsável alterado");
     } catch (error) {
       logFirestoreError({ fn: "updateResponsible", payload: { recordId: r.id, newAuthorId } }, error);
-      toast.error("Erro ao alterar responsável");
+      toast.error(getFirebaseErrorMessage(error, "Não foi possível alterar o responsável."));
     } finally {
       setUpdatingResponsible(false);
     }
