@@ -43,7 +43,7 @@ import { db } from "@/lib/firebase";
 import { useAuth } from "@/lib/auth-context";
 import { recordsCol } from "@/lib/firestore-helpers";
 import { DEFAULT_FORM_ID, fieldValue, logFirestoreError, migrateLegacyRecordNumbers, statusLabels, statusVariant } from "@/lib/forms";
-import type { AppRecord, FormDefinition } from "@/types";
+import type { AppRecord, FormDefinition, FormField } from "@/types";
 import { cn } from "@/lib/utils";
 
 const ALL = "todos";
@@ -110,6 +110,23 @@ function groupCount(records: AppRecord[], keyFn: (r: AppRecord) => string) {
     .map(([name, value]) => ({ name, value, total: value }))
     .sort((a, b) => b.value - a.value)
     .slice(0, 10);
+}
+
+function groupFormFieldSelections(records: AppRecord[], field?: FormField) {
+  if (!field) return [];
+
+  const counts = new Map((field.options ?? []).map((option) => [option, 0]));
+  records.forEach((record) => {
+    const rawValue = record.data?.[field.key];
+    const values = Array.isArray(rawValue) ? rawValue : [rawValue];
+    values.forEach((value) => {
+      const selection = value === undefined || value === null ? "" : String(value).trim();
+      if (selection) counts.set(selection, (counts.get(selection) ?? 0) + 1);
+    });
+  });
+
+  return Array.from(counts, ([name, total]) => ({ name, total }))
+    .sort((a, b) => b.total - a.total || a.name.localeCompare(b.name, "pt-BR"));
 }
 
 export default function DashboardPage() {
@@ -263,13 +280,17 @@ export default function DashboardPage() {
   const instalacaoData = useMemo(() => groupCount(filtered, (r) => fieldValue(r, "instalacao")), [filtered]);
   const sistemaData = useMemo(() => groupCount(filtered, (r) => fieldValue(r, "sistema")), [filtered]);
   const responsavelData = useMemo(() => groupCount(filtered, (r) => r.authorName || "N/D"), [filtered]);
-  const fonteDadosFieldKey = useMemo(
-    () => formDefinition?.fields.find((field) => normalizeFieldName(field.label) === "fonte_de_dados")?.key,
+  const fonteDadosField = useMemo(
+    () => formDefinition?.fields.find((field) => {
+      const label = normalizeFieldName(field.label);
+      const key = normalizeFieldName(field.key).replace(/_\d+$/, "");
+      return label === "fonte_de_dados" || key === "fonte_de_dados";
+    }),
     [formDefinition]
   );
   const fonteDadosData = useMemo(
-    () => groupCount(filtered, (r) => (fonteDadosFieldKey ? fieldValue(r, fonteDadosFieldKey) : "")),
-    [filtered, fonteDadosFieldKey]
+    () => groupFormFieldSelections(filtered, fonteDadosField),
+    [filtered, fonteDadosField]
   );
 
   const barChartFor: Record<DistributionKey, { name: string; total: number }[]> = {
