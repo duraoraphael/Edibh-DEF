@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import {
   collection,
   deleteDoc,
@@ -22,6 +22,7 @@ import {
   ArrowUp,
   ArrowUpDown,
   Check,
+  ChevronDown,
   Copy,
   Download,
   Eye,
@@ -30,13 +31,14 @@ import {
   Pencil,
   RotateCcw,
   Search,
+  SlidersHorizontal,
   Trash2,
   Upload,
   X as XIcon,
 } from "lucide-react";
 import { exportRecordsToExcel } from "@/lib/excel-export";
 import { db } from "@/lib/firebase";
-import { buildAuditLogData, logsCol, recordsCol, usersCol, writeAuditLog } from "@/lib/firestore-helpers";
+import { buildAuditLogData, logsCol, recordsCol, setRecordCase, usersCol, writeAuditLog } from "@/lib/firestore-helpers";
 import { useAuth } from "@/lib/auth-context";
 import {
   DEFAULT_FORM_ID,
@@ -48,6 +50,8 @@ import {
 } from "@/lib/forms";
 import { ExcelImportDialog } from "@/components/records/excel-import-dialog";
 import { RecordRow } from "@/components/records/record-row";
+import { CaseCheckbox } from "@/components/records/case-checkbox";
+import { Checkbox } from "@/components/ui/checkbox";
 import { generateRecordPdf, generateRecordsTablePdf } from "@/lib/pdf";
 import type { AppRecord, FormDefinition, FormField, LogEntry, RecordStatus, User } from "@/types";
 import { Input } from "@/components/ui/input";
@@ -56,7 +60,6 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { StatusBadge } from "@/components/ui/status-badge";
 import { EmptyState } from "@/components/ui/empty-state";
 import { FilterSelect } from "@/components/ui/filter-select";
-import { CollapsibleFilters } from "@/components/ui/collapsible-filters";
 import {
   Select,
   SelectContent,
@@ -90,7 +93,7 @@ type SortKey =
   | "equipamento"
   | "gerencia";
 
-const PAGE_SIZE = 8;
+const DEFAULT_PAGE_SIZE = 20;
 const ALL = "todos";
 
 interface FlowUpdateEntry {
@@ -103,6 +106,8 @@ interface FlowUpdateEntry {
 export default function RecordsHistoryPage() {
   const { user, profile } = useAuth();
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const requestedRecordId = searchParams.get("record");
   const [records, setRecords] = useState<AppRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
@@ -117,6 +122,7 @@ export default function RecordsHistoryPage() {
   const [sortKey, setSortKey] = useState<SortKey>("recordNumber");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
   const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE);
   const [selected, setSelected] = useState<AppRecord | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<AppRecord | null>(null);
   const [permanentDeleteTarget, setPermanentDeleteTarget] = useState<AppRecord | null>(null);
@@ -127,6 +133,7 @@ export default function RecordsHistoryPage() {
   const [bulkPermanentDeleting, setBulkPermanentDeleting] = useState(false);
   const [view, setView] = useState<"ativos" | "removidos">("ativos");
   const [dense, setDense] = useState(false);
+  const [filtersOpen, setFiltersOpen] = useState(false);
   const [formFields, setFormFields] = useState<FormField[]>([]);
   const [logs, setLogs] = useState<LogEntry[]>([]);
   const [logsLoadedForId, setLogsLoadedForId] = useState<string | null>(null);
@@ -141,6 +148,7 @@ export default function RecordsHistoryPage() {
   const [updatingStatus, setUpdatingStatus] = useState(false);
   const [users, setUsers] = useState<User[]>([]);
   const [updatingResponsible, setUpdatingResponsible] = useState(false);
+  const [updatingCaseIds, setUpdatingCaseIds] = useState<Set<string>>(new Set());
   const selectedId = selected?.id;
 
   useEffect(() => {
@@ -161,13 +169,19 @@ export default function RecordsHistoryPage() {
     const unsub = onSnapshot(
       query(recordsCol(), orderBy("createdAt", "desc")),
       (snap) => {
-        setRecords(snap.docs.map((d) => d.data()));
+        const nextRecords = snap.docs.map((d) => d.data());
+        setRecords(nextRecords);
+        if (requestedRecordId) {
+          setSelected((current) => current?.id === requestedRecordId
+            ? current
+            : nextRecords.find((record) => record.id === requestedRecordId && !record.deletedAt) || null);
+        }
         setLoading(false);
       },
       () => setLoading(false)
     );
     return () => unsub();
-  }, []);
+  }, [requestedRecordId]);
 
   useEffect(() => {
     // The audit log panel is only rendered while `selected` is set (see the
@@ -354,6 +368,8 @@ export default function RecordsHistoryPage() {
   async function updateRecordStatus(r: AppRecord, newStatus: RecordStatus) {
     if (newStatus === r.status) return;
     setUpdatingStatus(true);
+    setRecords((current) => current.map((record) => record.id === r.id ? { ...record, status: newStatus } : record));
+    setSelected((current) => current?.id === r.id ? { ...current, status: newStatus } : current);
     try {
       // Record + its approval doc change status together, atomically — a
       // batch instead of two independent writes, so there's never a partial
@@ -388,14 +404,41 @@ export default function RecordsHistoryPage() {
       ));
       await batch.commit();
 
-      setSelected((prev) => (prev && prev.id === r.id ? { ...prev, status: newStatus } : prev));
       toast.success(`Status alterado para ${statusLabels[newStatus]}`);
 
     } catch (error) {
+      setRecords((current) => current.map((record) => record.id === r.id ? { ...record, status: r.status } : record));
+      setSelected((current) => current?.id === r.id ? { ...current, status: r.status } : current);
       logFirestoreError({ fn: "updateRecordStatus", payload: { recordId: r.id, newStatus } }, error);
-      toast.error("Erro ao alterar status");
+      toast.error(getFirebaseErrorMessage(error, "Não foi possível alterar o status."));
     } finally {
       setUpdatingStatus(false);
+    }
+  }
+
+  async function updateCase(r: AppRecord, isCase: boolean) {
+    if (!canToggleCase(r) || updatingCaseIds.has(r.id)) return;
+    setUpdatingCaseIds((current) => new Set(current).add(r.id));
+    setRecords((current) => current.map((record) => record.id === r.id ? { ...record, isCase } : record));
+    setSelected((current) => current?.id === r.id ? { ...current, isCase } : current);
+    try {
+      await setRecordCase(
+        r,
+        isCase,
+        { uid: user?.uid, name: profile?.name || user?.email || undefined, role: profile?.role },
+      );
+      toast.success(isCase ? "Fluxo marcado como Case" : "Fluxo removido dos Cases");
+    } catch (error) {
+      setRecords((current) => current.map((record) => record.id === r.id ? { ...record, isCase: r.isCase } : record));
+      setSelected((current) => current?.id === r.id ? { ...current, isCase: r.isCase } : current);
+      logFirestoreError({ fn: "updateCase", payload: { recordId: r.id, isCase } }, error);
+      toast.error(getFirebaseErrorMessage(error, "Não foi possível atualizar o Case."));
+    } finally {
+      setUpdatingCaseIds((current) => {
+        const next = new Set(current);
+        next.delete(r.id);
+        return next;
+      });
     }
   }
 
@@ -479,8 +522,11 @@ export default function RecordsHistoryPage() {
     sortDir,
   ]);
 
-  const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
-  const pageItems = filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
+  const totalPages = Math.max(1, Math.ceil(filtered.length / pageSize));
+  const pageItems = filtered.slice((page - 1) * pageSize, page * pageSize);
+  const visiblePages = Array.from(new Set([1, page - 1, page, page + 1, totalPages]))
+    .filter((value) => value >= 1 && value <= totalPages)
+    .sort((a, b) => a - b);
 
   function toggleSort(key: SortKey) {
     if (sortKey === key) {
@@ -712,6 +758,16 @@ export default function RecordsHistoryPage() {
     return profile.role === "tecnico" && r.authorId === user?.uid;
   }
 
+  function canToggleCase(r: AppRecord) {
+    if (!profile) return false;
+    if (profile.role === "admin" || profile.role === "gerente") return true;
+    return profile.role === "tecnico" && r.authorId === user?.uid;
+  }
+
+  function canChangeStatus() {
+    return profile?.role === "admin" || profile?.role === "gerente";
+  }
+
   function canChangeResponsible() {
     return profile?.role === "admin" || profile?.role === "gerente";
   }
@@ -722,6 +778,11 @@ export default function RecordsHistoryPage() {
 
   function canPermanentDelete() {
     return profile?.role === "admin";
+  }
+
+  function closeDetails() {
+    setSelected(null);
+    if (searchParams.has("record")) router.replace("/records");
   }
 
   function canDuplicate() {
@@ -744,10 +805,10 @@ export default function RecordsHistoryPage() {
     <div className="flex flex-col gap-6">
       <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-center">
         <div>
-          <h1 className="text-2xl font-semibold tracking-tight">Histórico</h1>
-          <p className="text-sm text-muted-foreground">Consulte todos os registros submetidos</p>
+          <h1 className="text-3xl font-semibold tracking-tight">Histórico de Fluxos</h1>
+          <p className="mt-1 text-sm text-muted-foreground">Visualize, filtre e marque fluxos estratégicos como Case.</p>
         </div>
-        <div className="flex gap-2">
+        <div className="flex flex-wrap gap-2">
           {view === "ativos" && canDelete() && selectedIds.size > 0 && (
             <Button variant="destructive" onClick={() => setBulkDeleteOpen(true)}>
               <Trash2 className="h-4 w-4" />
@@ -779,7 +840,7 @@ export default function RecordsHistoryPage() {
         </div>
       </div>
 
-      <div className="flex gap-2 border-b border-border">
+      <div className="flex gap-2 border-b border-border/80">
         <button
           className={cn(
             "px-4 py-2 text-sm font-medium",
@@ -787,7 +848,7 @@ export default function RecordsHistoryPage() {
           )}
           onClick={() => switchView("ativos")}
         >
-          Ativos
+          Ativos <span className="ml-1 text-xs text-muted-foreground">{records.filter((record) => record.status !== "rascunho" && !record.deletedAt).length}</span>
         </button>
         <button
           className={cn(
@@ -796,33 +857,37 @@ export default function RecordsHistoryPage() {
           )}
           onClick={() => switchView("removidos")}
         >
-          Removidos
+          Removidos <span className="ml-1 text-xs text-muted-foreground">{records.filter((record) => !!record.deletedAt).length}</span>
         </button>
         <div className="ml-auto flex items-center">
-          <Button variant="ghost" size="sm" onClick={() => setDense((d) => !d)} aria-pressed={dense}>
+          <Button className="h-9 rounded-lg bg-card shadow-none" variant="outline" size="sm" onClick={() => setDense((d) => !d)} aria-pressed={dense}>
             {dense ? "Densidade: Compacta" : "Densidade: Confortável"}
           </Button>
         </div>
       </div>
 
       <div className="flex flex-col gap-3">
-        <div className="relative">
+        <div className="flex flex-col gap-2 md:flex-row">
+        <div className="relative flex-1">
           <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
           <Input
-            className="pl-9"
+            className="h-11 rounded-lg bg-card pl-10 shadow-none"
             placeholder="Buscar por ID, instalação, sistema, equipamento, gerência, responsável ou status..."
             value={search}
             onChange={(e) => resetPage(setSearch)(e.target.value)}
           />
         </div>
+        <Button className="h-11 min-w-36 justify-between rounded-lg bg-card shadow-none" variant="outline" onClick={() => setFiltersOpen((open) => !open)} aria-expanded={filtersOpen}>
+          <SlidersHorizontal className="h-4 w-4" />Filtros
+          {[statusFilter, responsavelFilter, gerenciaFilter, instalacaoFilter, sistemaFilter, equipamentoFilter].filter((value) => value !== ALL).length + (dateFrom ? 1 : 0) + (dateTo ? 1 : 0) > 0 && (
+            <span className="rounded bg-primary/10 px-1.5 text-xs text-primary">{[statusFilter, responsavelFilter, gerenciaFilter, instalacaoFilter, sistemaFilter, equipamentoFilter].filter((value) => value !== ALL).length + (dateFrom ? 1 : 0) + (dateTo ? 1 : 0)}</span>
+          )}
+          <ChevronDown className={cn("h-4 w-4 text-muted-foreground transition-transform", filtersOpen && "rotate-180")} />
+        </Button>
+        </div>
 
-        <CollapsibleFilters
-          activeCount={
-            [statusFilter, responsavelFilter, gerenciaFilter, instalacaoFilter, sistemaFilter, equipamentoFilter].filter(
-              (v) => v !== ALL
-            ).length + (dateFrom ? 1 : 0) + (dateTo ? 1 : 0)
-          }
-        >
+        {filtersOpen && (
+          <div className="rounded-lg border border-border bg-card p-4">
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-7">
             <FilterSelect label="Status" value={statusFilter} onChange={resetPage(setStatusFilter)}>
               {Object.entries(statusLabels).map(([k, v]) => (
@@ -871,10 +936,11 @@ export default function RecordsHistoryPage() {
               <Input type="date" value={dateTo} onChange={(e) => resetPage(setDateTo)(e.target.value)} title="Período até" />
             </div>
           </div>
-        </CollapsibleFilters>
+          </div>
+        )}
       </div>
 
-      <div className="overflow-x-auto rounded-xl border border-border bg-card">
+      <div className="overflow-x-auto rounded-lg border border-border/80 bg-card">
         {loading ? (
           <div className="flex flex-col gap-2 p-4">
             {Array.from({ length: 5 }).map((_, i) => (
@@ -882,18 +948,17 @@ export default function RecordsHistoryPage() {
             ))}
           </div>
         ) : pageItems.length === 0 ? (
-          <EmptyState icon={Search} text="Nenhum registro encontrado" className="p-12" />
+          <EmptyState icon={Search} text="Nenhum fluxo encontrado" className="p-12" />
         ) : (
           <Table>
-            <TableHeader className="sticky top-0 z-10 bg-card">
+            <TableHeader className="sticky top-0 z-10 bg-muted/35 text-xs">
               <TableRow>
                 {((view === "ativos" && canDelete()) || (view === "removidos" && canPermanentDelete())) && (
                   <TableHead className="w-8">
-                    <input
-                      type="checkbox"
+                    <Checkbox
                       aria-label="Selecionar todos os registros da página"
                       checked={pageItems.length > 0 && pageItems.every((r) => selectedIds.has(r.id))}
-                      onChange={toggleSelectAllOnPage}
+                      onCheckedChange={toggleSelectAllOnPage}
                     />
                   </TableHead>
                 )}
@@ -912,7 +977,7 @@ export default function RecordsHistoryPage() {
                     Sistema {renderSortIcon("sistema")}
                   </button>
                 </TableHead>
-                <TableHead>
+                <TableHead className="min-w-64">
                   <button className="flex items-center gap-1" onClick={() => toggleSort("equipamento")}>
                     Equipamento {renderSortIcon("equipamento")}
                   </button>
@@ -937,7 +1002,8 @@ export default function RecordsHistoryPage() {
                     Responsável {renderSortIcon("authorName")}
                   </button>
                 </TableHead>
-                <TableHead className="text-right">Ações</TableHead>
+                <TableHead>Case</TableHead>
+                <TableHead className="text-center">Ações</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -950,6 +1016,14 @@ export default function RecordsHistoryPage() {
                   selectable={(view === "ativos" && canDelete()) || (view === "removidos" && canPermanentDelete())}
                   selected={selectedIds.has(r.id)}
                   onToggleSelected={() => toggleSelected(r.id)}
+                  caseControl={
+                    <CaseCheckbox
+                      checked={r.isCase === true}
+                      disabled={view !== "ativos" || !canToggleCase(r) || updatingCaseIds.has(r.id)}
+                      recordLabel={r.recordNumber || r.id}
+                      onCheckedChange={(checked) => updateCase(r, checked)}
+                    />
+                  }
                   actions={
                     <DropdownMenu>
                       <DropdownMenuTrigger asChild>
@@ -1004,33 +1078,35 @@ export default function RecordsHistoryPage() {
             </TableBody>
           </Table>
         )}
-      </div>
-
-      {totalPages > 1 && (
-        <div className="flex items-center justify-center gap-2">
-          {Array.from({ length: totalPages }).map((_, i) => (
-            <button
-              key={i}
-              onClick={() => setPage(i + 1)}
-              className={cn(
-                "flex h-8 w-8 items-center justify-center rounded-lg text-sm",
-                page === i + 1 ? "bg-primary text-white" : "hover:bg-muted"
-              )}
-            >
-              {i + 1}
-            </button>
-          ))}
+      {filtered.length > 0 && (
+        <div className="flex flex-col items-center justify-between gap-3 border-t border-border/70 bg-card px-4 py-3 text-sm lg:flex-row">
+          <p className="text-muted-foreground">Mostrando <span className="font-medium text-foreground">{(page - 1) * pageSize + 1} a {Math.min(page * pageSize, filtered.length)}</span> de <span className="font-medium text-foreground">{filtered.length}</span> registros</p>
+          <div className="flex flex-wrap items-center justify-center gap-1">
+            <Button variant="ghost" size="sm" disabled={page === 1} onClick={() => setPage((current) => current - 1)}>Anterior</Button>
+            {visiblePages.map((pageNumber, index) => (
+              <span key={pageNumber} className="contents">
+                {index > 0 && pageNumber - visiblePages[index - 1] > 1 && <span className="px-1 text-muted-foreground">…</span>}
+                <button onClick={() => setPage(pageNumber)} className={cn("flex h-8 w-8 items-center justify-center rounded-md border text-sm transition-colors", page === pageNumber ? "border-primary bg-card text-primary" : "border-transparent text-muted-foreground hover:bg-muted hover:text-foreground")}>{pageNumber}</button>
+              </span>
+            ))}
+            <Button variant="ghost" size="sm" disabled={page === totalPages} onClick={() => setPage((current) => current + 1)}>Próxima</Button>
+          </div>
+          <Select value={String(pageSize)} onValueChange={(value) => { setPageSize(Number(value)); setPage(1); }}>
+            <SelectTrigger className="h-8 w-32 rounded-md shadow-none"><SelectValue /></SelectTrigger>
+            <SelectContent>{[10, 20, 50].map((size) => <SelectItem key={size} value={String(size)}>{size} por página</SelectItem>)}</SelectContent>
+          </Select>
         </div>
       )}
+      </div>
 
-      <Dialog open={!!selected} onOpenChange={(o) => !o && setSelected(null)}>
+      <Dialog open={!!selected} onOpenChange={(o) => !o && closeDetails()}>
         <DialogContent className="grid h-[92vh] w-[95vw] max-w-6xl grid-rows-[auto_1fr] gap-0 overflow-hidden p-0">
           {selected && (
             <>
               <DialogHeader className="border-b border-border px-6 py-4">
                 <DialogTitle className="flex flex-wrap items-center gap-3">
                   {selected.recordNumber || selected.id}
-                  {canEdit(selected) ? (
+                  {canChangeStatus() ? (
                     <Select
                       value={selected.status}
                       onValueChange={(v) => updateRecordStatus(selected, v as RecordStatus)}

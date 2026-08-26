@@ -23,6 +23,7 @@ import {
   Mail,
   X,
   FolderKanban,
+  BriefcaseBusiness,
   ShieldCheck,
   Plug,
   User,
@@ -42,6 +43,7 @@ const groups: NavGroup[] = [
     items: [
       { label: "Novo Registro", href: "/records/new", icon: FilePlus2, roles: null },
       { label: "Histórico", href: "/records", icon: History, roles: null },
+      { label: "Cases", href: "/cases", icon: BriefcaseBusiness, roles: null },
       { label: "Aprovações", href: "/approvals", icon: ClipboardCheck, roles: ["admin", "gerente"] },
       { label: "Enviar por E-mail", href: "/email", icon: Mail, roles: null },
     ],

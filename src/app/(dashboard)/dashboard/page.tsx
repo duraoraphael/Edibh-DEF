@@ -3,7 +3,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { deleteDoc, doc, onSnapshot, orderBy, query, setDoc } from "firebase/firestore";
-import { motion } from "framer-motion";
 import { toast } from "sonner";
 import {
   FileText,
@@ -14,20 +13,17 @@ import {
   Settings2,
   Trash2,
   Plus,
+  SlidersHorizontal,
 } from "lucide-react";
 import {
-  Bar,
-  BarChart,
+  Area,
+  AreaChart,
   CartesianGrid,
-  Cell,
-  Pie,
-  PieChart,
   ResponsiveContainer,
   Tooltip,
   XAxis,
   YAxis,
 } from "recharts";
-import type { ReactElement } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -36,7 +32,6 @@ import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { EmptyState } from "@/components/ui/empty-state";
 import { FilterSelect } from "@/components/ui/filter-select";
-import { CollapsibleFilters } from "@/components/ui/collapsible-filters";
 import {
   Dialog,
   DialogContent,
@@ -49,9 +44,8 @@ import { useAuth } from "@/lib/auth-context";
 import { recordsCol } from "@/lib/firestore-helpers";
 import { fieldValue, logFirestoreError, migrateLegacyRecordNumbers, statusLabels, statusVariant } from "@/lib/forms";
 import type { AppRecord } from "@/types";
+import { cn } from "@/lib/utils";
 
-// alinhado ao tema: --primary-500, --warning, --destructive, --muted-foreground, --primary-300
-const COLORS = ["#0e7a4b", "#f59e0b", "#dc2626", "#6b7280", "#6cbd90"];
 const ALL = "todos";
 
 const CARD_KEYS = ["total", "pendentes", "aprovados", "rejeitados", "andamento"] as const;
@@ -68,7 +62,7 @@ const cardMeta: Record<CardKey, { label: string; icon: typeof FileText }> = {
 };
 
 const chartMeta: Record<ChartKey, string> = {
-  periodo: "Registros por período",
+  periodo: "Evolução de registros",
   status: "Distribuição por status",
   gerencia: "Registros por gerência",
   instalacao: "Registros por instalação",
@@ -83,7 +77,7 @@ interface DashboardPrefs {
 
 const DEFAULT_PREFS: DashboardPrefs = {
   cards: [...CARD_KEYS],
-  charts: ["periodo", "status", "gerencia", "responsavel"],
+  charts: ["periodo", "status", "gerencia", "instalacao", "sistema", "responsavel"],
 };
 
 function groupCount(records: AppRecord[], keyFn: (r: AppRecord) => string) {
@@ -107,6 +101,8 @@ export default function DashboardPage() {
   const [configOpen, setConfigOpen] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<AppRecord | null>(null);
   const [deleting, setDeleting] = useState(false);
+  const [filtersOpen, setFiltersOpen] = useState(false);
+  const [distributionKey, setDistributionKey] = useState<"gerencia" | "instalacao" | "sistema" | "responsavel">("gerencia");
 
   const [gerenciaFilter, setGerenciaFilter] = useState(ALL);
   const [instalacaoFilter, setInstalacaoFilter] = useState(ALL);
@@ -224,7 +220,7 @@ export default function DashboardPage() {
       const key = d ? `${d.getDate()}/${d.getMonth() + 1}` : "N/D";
       map.set(key, (map.get(key) || 0) + 1);
     });
-    return Array.from(map.entries()).map(([name, total]) => ({ name, total }));
+    return Array.from(map.entries()).map(([name, total]) => ({ name, total })).reverse();
   }, [filtered]);
 
   const pieData = useMemo(() => {
@@ -293,15 +289,24 @@ export default function DashboardPage() {
     anoFilter,
     mesFilter,
   ].filter((v) => v !== ALL).length + (dateFrom ? 1 : 0) + (dateTo ? 1 : 0);
+  const enabledDistributions = (["gerencia", "instalacao", "sistema", "responsavel"] as const)
+    .filter((key) => prefs.charts.includes(key));
+  const visibleDistribution = enabledDistributions.includes(distributionKey)
+    ? distributionKey
+    : enabledDistributions[0];
 
   return (
-    <div className="flex flex-col gap-6">
-      <div className="flex flex-col justify-between gap-3 sm:flex-row sm:items-center">
+    <div className="flex flex-col gap-8">
+      <header className="flex flex-col justify-between gap-4 lg:flex-row lg:items-end">
         <div>
-          <h1 className="text-2xl font-semibold tracking-tight">Dashboard</h1>
-          <p className="text-sm text-muted-foreground">Visão geral do Fluxo de Equipamentos</p>
+          <h1 className="text-3xl font-semibold tracking-tight">Dashboard</h1>
+          <p className="mt-1 text-sm text-muted-foreground">Visão geral do Fluxo de Equipamentos</p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
+          <Button variant="outline" onClick={() => setFiltersOpen((open) => !open)} aria-expanded={filtersOpen}>
+            <SlidersHorizontal className="h-4 w-4" />
+            Filtros{activeFilterCount > 0 ? ` (${activeFilterCount})` : ""}
+          </Button>
           {isAdmin && (
             <Button variant="outline" onClick={() => setConfigOpen(true)}>
               <Settings2 className="h-4 w-4" />
@@ -315,10 +320,11 @@ export default function DashboardPage() {
             </Link>
           </Button>
         </div>
-      </div>
+      </header>
 
-      <CollapsibleFilters activeCount={activeFilterCount}>
-        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-8">
+      {filtersOpen && (
+        <Card className="p-4 shadow-none">
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 xl:grid-cols-6 2xl:grid-cols-10">
           <FilterSelect label="Gerência" value={gerenciaFilter} onChange={setGerenciaFilter} options={gerencias} />
           <FilterSelect label="Instalação" value={instalacaoFilter} onChange={setInstalacaoFilter} options={instalacoes} />
           <FilterSelect label="Sistema" value={sistemaFilter} onChange={setSistemaFilter} options={sistemas} />
@@ -347,53 +353,53 @@ export default function DashboardPage() {
           <Input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} title="Período de" />
           <Input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} title="Período até" />
         </div>
-      </CollapsibleFilters>
+        </Card>
+      )}
 
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-5">
-        {CARD_KEYS.filter((k) => prefs.cards.includes(k)).map((k, i) => {
+      <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+        {CARD_KEYS.filter((k) => prefs.cards.includes(k)).map((k) => {
           const meta = cardMeta[k];
+          const percentage = filtered.length ? Math.round((stats[k] / filtered.length) * 1000) / 10 : 0;
           return (
-            <motion.div key={k} initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.05 }}>
-              <Card className="transition-shadow hover:shadow-md">
-                <CardContent className="flex items-center justify-between p-5">
+              <Card key={k} className={cn("shadow-none transition-colors hover:border-primary/30", k === "andamento" && stats[k] === 0 && "opacity-70")}>
+                <CardContent className="flex items-start justify-between p-5">
                   <div>
-                    <p className="text-sm text-muted-foreground">{meta.label}</p>
+                    <p className="text-xs font-medium text-muted-foreground">{meta.label}</p>
                     {loading ? (
                       <Skeleton className="mt-2 h-7 w-12" />
                     ) : (
-                      <p className="mt-1 text-2xl font-semibold tracking-tight">{stats[k]}</p>
+                      <><p className="mt-2 text-3xl font-semibold tracking-tight tabular-nums">{stats[k]}</p><p className="mt-1 text-xs text-muted-foreground">{percentage}% do total filtrado</p></>
                     )}
                   </div>
-                  <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-primary-100 text-primary-700">
-                    <meta.icon className="h-5 w-5" />
-                  </div>
+                  <meta.icon className="h-4 w-4 text-primary" />
                 </CardContent>
               </Card>
-            </motion.div>
           );
         })}
-      </div>
+      </section>
 
-      <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+      <section className="grid gap-4 xl:grid-cols-[minmax(0,1.65fr)_minmax(20rem,0.85fr)]">
         {prefs.charts.includes("periodo") && (
-          <Card>
-            <CardHeader>
+          <Card className="shadow-none">
+            <CardHeader className="pb-2">
               <CardTitle>{chartMeta.periodo}</CardTitle>
+              <p className="text-sm text-muted-foreground">Volume de novos registros no período filtrado</p>
             </CardHeader>
-            <CardContent className="h-72">
+            <CardContent className="h-80">
               {loading ? (
                 <Skeleton className="h-full w-full" />
               ) : chartData.length === 0 ? (
                 <EmptyState text="Nenhum registro encontrado" />
               ) : (
                 <ResponsiveContainer width="100%" height="100%">
-                  <BarChart data={chartData}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
-                    <XAxis dataKey="name" fontSize={12} stroke="#6b7280" />
-                    <YAxis fontSize={12} stroke="#6b7280" allowDecimals={false} />
+                  <AreaChart data={chartData} margin={{ left: -16, right: 8, top: 16 }}>
+                    <defs><linearGradient id="recordsFill" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="#0e7a4b" stopOpacity={0.22} /><stop offset="100%" stopColor="#0e7a4b" stopOpacity={0.02} /></linearGradient></defs>
+                    <CartesianGrid strokeDasharray="3 3" stroke="#e8ecea" vertical={false} />
+                    <XAxis dataKey="name" fontSize={11} stroke="#7b8580" tickLine={false} axisLine={false} />
+                    <YAxis fontSize={11} stroke="#7b8580" allowDecimals={false} tickLine={false} axisLine={false} />
                     <Tooltip />
-                    <Bar dataKey="total" fill="#0e7a4b" radius={[6, 6, 0, 0]} />
-                  </BarChart>
+                    <Area type="monotone" dataKey="total" stroke="#0e7a4b" strokeWidth={2} fill="url(#recordsFill)" />
+                  </AreaChart>
                 </ResponsiveContainer>
               )}
             </CardContent>
@@ -401,64 +407,56 @@ export default function DashboardPage() {
         )}
 
         {prefs.charts.includes("status") && (
-          <Card>
-            <CardHeader>
+          <Card className="shadow-none">
+            <CardHeader className="pb-2">
               <CardTitle>{chartMeta.status}</CardTitle>
+              <p className="text-sm text-muted-foreground">Participação no total filtrado</p>
             </CardHeader>
-            <CardContent className="h-72">
+            <CardContent>
               {loading ? (
                 <Skeleton className="h-full w-full" />
               ) : pieData.length === 0 ? (
                 <EmptyState text="Nenhum dado disponível" />
               ) : (
-                <ResponsiveContainer width="100%" height="100%">
-                  <PieChart>
-                    <Pie data={pieData} dataKey="value" nameKey="name" innerRadius={50} outerRadius={80} paddingAngle={2}>
-                      {pieData.map((_, i) => (
-                        <Cell key={i} fill={COLORS[i % COLORS.length]} />
-                      ))}
-                    </Pie>
-                    <Tooltip />
-                  </PieChart>
-                </ResponsiveContainer>
+                <DistributionList data={pieData.map((item) => ({ name: item.name, total: item.value }))} />
               )}
             </CardContent>
           </Card>
         )}
 
-        {(["gerencia", "instalacao", "sistema", "responsavel"] as const)
-          .filter((k) => prefs.charts.includes(k))
-          .map((k) => (
-            <Card key={k}>
-              <CardHeader>
-                <CardTitle>{chartMeta[k]}</CardTitle>
-              </CardHeader>
-              <CardContent className="h-72 max-h-72">
-                {loading ? (
-                  <Skeleton className="h-full w-full" />
-                ) : barChartFor[k].length === 0 ? (
-                  <EmptyState text="Nenhum dado disponível" />
-                ) : (
-                  <CategoryBarChart data={barChartFor[k]} />
-                )}
-              </CardContent>
-            </Card>
-          ))}
-      </div>
+      </section>
 
-      <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-        <Card>
-          <CardHeader>
-            <CardTitle>Últimos Registros</CardTitle>
+      {visibleDistribution && (
+        <section>
+          <div className="mb-4 flex flex-col justify-between gap-3 sm:flex-row sm:items-end">
+            <div><h2 className="text-lg font-semibold tracking-tight">Distribuições</h2><p className="text-sm text-muted-foreground">Compare os registros por dimensão</p></div>
+            <div className="flex overflow-x-auto border-b border-border">
+              {enabledDistributions.map((key) => (
+                <button key={key} onClick={() => setDistributionKey(key)} className={cn("whitespace-nowrap border-b-2 px-4 py-2 text-sm font-medium transition-colors", visibleDistribution === key ? "border-primary text-primary" : "border-transparent text-muted-foreground hover:text-foreground")}>
+                  {({ gerencia: "Gerência", instalacao: "Instalação", sistema: "Sistema", responsavel: "Responsável" })[key]}
+                </button>
+              ))}
+            </div>
+          </div>
+          <Card className="p-5 shadow-none">
+            {loading ? <Skeleton className="h-64 w-full" /> : barChartFor[visibleDistribution].length === 0 ? <EmptyState text="Nenhum dado disponível" /> : <DistributionList data={barChartFor[visibleDistribution]} />}
+          </Card>
+        </section>
+      )}
+
+      <section className="grid gap-4 lg:grid-cols-2">
+        <Card className="shadow-none">
+          <CardHeader className="flex-row items-center justify-between">
+            <CardTitle>Últimos Registros</CardTitle><Link href="/records" className="text-sm font-medium text-primary hover:underline">Ver todos</Link>
           </CardHeader>
-          <CardContent className="flex flex-col gap-2">
+          <CardContent className="divide-y divide-border">
             {loading ? (
               Array.from({ length: 4 }).map((_, i) => <Skeleton key={i} className="h-12 w-full" />)
             ) : filtered.length === 0 ? (
               <EmptyState text="Nenhum registro encontrado" />
             ) : (
               filtered.slice(0, 6).map((r) => (
-                <div key={r.id} className="flex items-center justify-between rounded-xl border border-border p-3">
+                <div key={r.id} className="flex items-center justify-between gap-3 py-3">
                   <div className="min-w-0">
                     <p className="truncate text-sm font-medium">{r.recordNumber || r.id}</p>
                     <p className="text-xs text-muted-foreground">{r.authorName || "—"}</p>
@@ -469,11 +467,11 @@ export default function DashboardPage() {
             )}
 
             {isAdmin && drafts.length > 0 && (
-              <div className="mt-3 border-t border-border pt-3">
+              <div className="mt-3 border-t border-dashed border-border pt-3">
                 <p className="mb-2 text-xs font-medium text-muted-foreground">Lixeira · Rascunhos</p>
                 <div className="flex flex-col gap-2">
                   {drafts.map((r) => (
-                    <div key={r.id} className="flex items-center justify-between rounded-xl border border-dashed border-border p-2">
+                    <div key={r.id} className="flex items-center justify-between py-1.5">
                       <p className="truncate text-xs text-muted-foreground">{r.recordNumber || r.id}</p>
                       <Button variant="ghost" size="icon" onClick={() => setDeleteTarget(r)}>
                         <Trash2 className="h-4 w-4 text-destructive" />
@@ -486,26 +484,26 @@ export default function DashboardPage() {
           </CardContent>
         </Card>
 
-        <Card>
+        <Card className="shadow-none">
           <CardHeader>
             <CardTitle>Pendências</CardTitle>
           </CardHeader>
-          <CardContent className="flex flex-col gap-2">
+          <CardContent className="divide-y divide-border">
             {loading ? (
               Array.from({ length: 4 }).map((_, i) => <Skeleton key={i} className="h-12 w-full" />)
             ) : pendingRecords.length === 0 ? (
               <EmptyState text="Nenhuma pendência no momento" />
             ) : (
               pendingRecords.map((r) => (
-                <div key={r.id} className="flex items-center justify-between rounded-xl border border-border p-3">
-                  <p className="truncate text-sm font-medium">{r.recordNumber || r.id}</p>
+                <div key={r.id} className="flex items-center justify-between gap-3 py-3">
+                  <div className="min-w-0"><p className="truncate text-sm font-medium">{r.recordNumber || r.id}</p><p className="truncate text-xs text-muted-foreground">{r.authorName || "—"}</p></div>
                   <Badge variant="warning">{statusLabels.pendente}</Badge>
                 </div>
               ))
             )}
           </CardContent>
         </Card>
-      </div>
+      </section>
 
       <Dialog open={configOpen} onOpenChange={setConfigOpen}>
         <DialogContent>
@@ -565,53 +563,14 @@ export default function DashboardPage() {
   );
 }
 
-function truncateLabel(name: string, max = 14): string {
-  return name.length > max ? `${name.slice(0, max - 1)}…` : name;
-}
-
-function CategoryTick({
-  x,
-  y,
-  payload,
-}: {
-  x?: number;
-  y?: number;
-  payload?: { value: string };
-}): ReactElement {
-  const value = payload?.value ?? "";
+function DistributionList({ data }: { data: { name: string; total: number }[] }) {
+  const total = data.reduce((sum, item) => sum + item.total, 0);
   return (
-    <g transform={`translate(${x},${y})`}>
-      <title>{value}</title>
-      <text dx={-6} dy={4} textAnchor="end" fontSize={12} fill="#6b7280">
-        {truncateLabel(value)}
-      </text>
-    </g>
-  );
-}
-
-function CategoryBarChart({ data }: { data: { name: string; total: number }[] }) {
-  const rowHeight = 32;
-  const minHeight = 260;
-  const chartHeight = Math.max(minHeight, data.length * rowHeight);
-  return (
-    <div className="h-full overflow-y-auto overflow-x-hidden">
-      <div style={{ height: chartHeight, minWidth: "100%" }}>
-        <ResponsiveContainer width="100%" height="100%">
-          <BarChart data={data} layout="vertical" margin={{ left: 8, right: 16 }}>
-            <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" horizontal={false} />
-            <XAxis type="number" fontSize={12} stroke="#6b7280" allowDecimals={false} />
-            <YAxis
-              type="category"
-              dataKey="name"
-              width={110}
-              interval={0}
-              tick={CategoryTick as never}
-            />
-            <Tooltip formatter={(value) => [value, "Registros"]} labelFormatter={(label) => label} />
-            <Bar dataKey="total" fill="#0e7a4b" radius={[0, 6, 6, 0]} barSize={18} />
-          </BarChart>
-        </ResponsiveContainer>
-      </div>
+    <div className="flex max-h-80 flex-col gap-4 overflow-y-auto pr-2">
+      {data.map((item) => {
+        const percentage = total ? Math.round((item.total / total) * 1000) / 10 : 0;
+        return <div key={item.name}><div className="mb-1.5 flex items-center justify-between gap-3 text-sm"><span className="truncate text-foreground" title={item.name}>{item.name}</span><span className="shrink-0 tabular-nums text-muted-foreground"><strong className="font-medium text-foreground">{item.total}</strong> · {percentage}%</span></div><div className="h-1.5 overflow-hidden rounded-sm bg-muted"><div className="h-full rounded-sm bg-primary/75" style={{ width: `${percentage}%` }} /></div></div>;
+      })}
     </div>
   );
 }

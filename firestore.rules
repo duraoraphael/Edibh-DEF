@@ -65,7 +65,7 @@
           && request.resource.data.status in ['rascunho', 'pendente']
           && request.resource.data.keys().hasOnly([
             'recordNumber', 'description', 'category', 'status', 'authorId', 'authorName',
-            'attachments', 'formId', 'data', 'createdAt', 'updatedAt', 'importBatchId'
+            'attachments', 'formId', 'data', 'createdAt', 'updatedAt', 'importBatchId', 'isCase'
           ]);
         allow update: if isAdminOrGerente()
           || (isTecnico()
@@ -79,7 +79,12 @@
                 && request.resource.data.status == 'pendente'
                 && !resource.data.keys().hasAny(['recordNumber'])
                 && request.resource.data.recordNumber is string
-                && request.resource.data.recordNumber.matches('[0-9]+/[0-9]{4}'))));
+                && request.resource.data.recordNumber.matches('[0-9]+/[0-9]{4}'))))
+          || (isTecnico()
+            && resource.data.authorId == request.auth.uid
+            && request.resource.data.authorId == resource.data.authorId
+            && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['isCase', 'updatedAt'])
+            && request.resource.data.isCase is bool);
         allow delete: if isAdmin();
 
         match /updates/{updateId} {
@@ -109,7 +114,7 @@
           && request.resource.data.authorId == getAfter(/databases/$(database)/documents/records/$(approvalId)).data.authorId;
         allow update: if isAdminOrGerente()
           && request.resource.data.authorId == getAfter(/databases/$(database)/documents/records/$(approvalId)).data.authorId
-          && request.resource.data.status in ['pendente', 'aprovado', 'rejeitado', 'reajuste'];
+          && request.resource.data.status in ['pendente', 'aprovado', 'rejeitado', 'reajuste', 'concluido', 'concluido_direto'];
         allow delete: if isAdmin();
       }
 

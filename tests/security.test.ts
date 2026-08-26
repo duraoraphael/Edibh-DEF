@@ -35,6 +35,9 @@ test("Firebase rules retain deny-by-default and protected role/attachment checks
   assert.match(firestore, /resource\.data\.status == 'rascunho'/);
   assert.match(firestore, /request\.resource\.data\.status == 'pendente'/);
   assert.match(firestore, /request\.resource\.data\.recordNumber\.matches/);
+  assert.match(firestore, /affectedKeys\(\)\.hasOnly\(\['isCase', 'updatedAt'\]\)/);
+  assert.match(firestore, /request\.resource\.data\.isCase is bool/);
+  assert.match(firestore, /'concluido', 'concluido_direto'/);
   assert.doesNotMatch(
     firestore,
     /allow update: if isAdminOrGerente\(\)\s*&& request\.resource\.data\.authorId == resource\.data\.authorId/

@@ -42,6 +42,7 @@ export interface AppRecord {
   description?: string;
   category?: string;
   status: RecordStatus;
+  isCase?: boolean;
   authorId: string;
   authorName?: string;
   attachments?: AttachmentRef[];
@@ -63,7 +64,7 @@ export interface Approval {
   recordNumber?: string;
   /** Denormalized from the parent record's authorId; lets Firestore rules verify ownership without a get(). */
   authorId?: string;
-  status: "pendente" | ApprovalAction;
+  status: "pendente" | ApprovalAction | "concluido" | "concluido_direto";
   comment?: string;
   reviewerId?: string;
   reviewerName?: string;

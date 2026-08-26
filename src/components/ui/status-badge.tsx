@@ -7,7 +7,7 @@ export function StatusBadge({ status, className }: { status: RecordStatus | stri
   const label = statusLabels[key] ?? String(status);
   const variant = statusVariant[key] ?? "secondary";
   return (
-    <Badge variant={variant} className={className}>
+    <Badge variant={variant} className={`rounded-full px-2.5 ${className || ""}`}>
       {label}
     </Badge>
   );

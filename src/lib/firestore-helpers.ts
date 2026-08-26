@@ -1,10 +1,12 @@
 import {
   addDoc,
   collection,
+  doc,
   getDocs,
   query,
   where,
   QueryDocumentSnapshot,
+  writeBatch,
   SnapshotOptions,
   FirestoreDataConverter,
   DocumentData,
@@ -144,4 +146,18 @@ export async function writeAuditLog(
   entry: AuditEntryInput
 ): Promise<void> {
   await addDoc(logsCol(), buildAuditLogData(actor, entry));
+}
+
+/** Persist the Case flag and its audit entry as one atomic operation. */
+export async function setRecordCase(record: AppRecord, isCase: boolean, actor: AuditActor): Promise<void> {
+  const batch = writeBatch(db);
+  batch.update(doc(db, "records", record.id), { isCase, updatedAt: new Date().toISOString() });
+  batch.set(doc(logsCol()), buildAuditLogData(actor, {
+    action: isCase ? "Marcado como Case" : "Removido dos Cases",
+    recordId: record.id,
+    recordNumber: record.recordNumber,
+    statusBefore: record.status,
+    statusAfter: record.status,
+  }));
+  await batch.commit();
 }
