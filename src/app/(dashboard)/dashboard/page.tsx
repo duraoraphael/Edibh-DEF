@@ -42,8 +42,8 @@ import {
 import { db } from "@/lib/firebase";
 import { useAuth } from "@/lib/auth-context";
 import { recordsCol } from "@/lib/firestore-helpers";
-import { fieldValue, logFirestoreError, migrateLegacyRecordNumbers, statusLabels, statusVariant } from "@/lib/forms";
-import type { AppRecord } from "@/types";
+import { DEFAULT_FORM_ID, fieldValue, logFirestoreError, migrateLegacyRecordNumbers, statusLabels, statusVariant } from "@/lib/forms";
+import type { AppRecord, FormDefinition } from "@/types";
 import { cn } from "@/lib/utils";
 
 const ALL = "todos";
@@ -52,6 +52,26 @@ const CARD_KEYS = ["total", "pendentes", "aprovados", "rejeitados", "andamento"]
 type CardKey = (typeof CARD_KEYS)[number];
 const CHART_KEYS = ["periodo", "status", "gerencia", "instalacao", "sistema", "responsavel"] as const;
 type ChartKey = (typeof CHART_KEYS)[number];
+const DISTRIBUTION_KEYS = ["gerencia", "instalacao", "sistema", "responsavel", "fonteDados"] as const;
+type DistributionKey = (typeof DISTRIBUTION_KEYS)[number];
+
+const distributionLabels: Record<DistributionKey, string> = {
+  gerencia: "Gerência",
+  instalacao: "Instalação",
+  sistema: "Sistema",
+  responsavel: "Responsável",
+  fonteDados: "Fonte de Dados",
+};
+
+function normalizeFieldName(value: string): string {
+  return value
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "");
+}
 
 const cardMeta: Record<CardKey, { label: string; icon: typeof FileText }> = {
   total: { label: "Total de Registros", icon: FileText },
@@ -96,13 +116,14 @@ export default function DashboardPage() {
   const { profile } = useAuth();
   const isAdmin = profile?.role === "admin";
   const [records, setRecords] = useState<AppRecord[]>([]);
+  const [formDefinition, setFormDefinition] = useState<FormDefinition | null>(null);
   const [loading, setLoading] = useState(true);
   const [prefs, setPrefs] = useState<DashboardPrefs>(DEFAULT_PREFS);
   const [configOpen, setConfigOpen] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<AppRecord | null>(null);
   const [deleting, setDeleting] = useState(false);
   const [filtersOpen, setFiltersOpen] = useState(false);
-  const [distributionKey, setDistributionKey] = useState<"gerencia" | "instalacao" | "sistema" | "responsavel">("gerencia");
+  const [distributionKey, setDistributionKey] = useState<DistributionKey>("gerencia");
 
   const [gerenciaFilter, setGerenciaFilter] = useState(ALL);
   const [instalacaoFilter, setInstalacaoFilter] = useState(ALL);
@@ -143,9 +164,15 @@ export default function DashboardPage() {
         });
       }
     });
+    const unsub4 = onSnapshot(
+      doc(db, "formFields", DEFAULT_FORM_ID),
+      (snap) => setFormDefinition(snap.exists() ? (snap.data() as FormDefinition) : null),
+      () => setFormDefinition(null)
+    );
     return () => {
       unsub1();
       unsub3();
+      unsub4();
     };
   }, []);
 
@@ -236,12 +263,21 @@ export default function DashboardPage() {
   const instalacaoData = useMemo(() => groupCount(filtered, (r) => fieldValue(r, "instalacao")), [filtered]);
   const sistemaData = useMemo(() => groupCount(filtered, (r) => fieldValue(r, "sistema")), [filtered]);
   const responsavelData = useMemo(() => groupCount(filtered, (r) => r.authorName || "N/D"), [filtered]);
+  const fonteDadosFieldKey = useMemo(
+    () => formDefinition?.fields.find((field) => normalizeFieldName(field.label) === "fonte_de_dados")?.key,
+    [formDefinition]
+  );
+  const fonteDadosData = useMemo(
+    () => groupCount(filtered, (r) => (fonteDadosFieldKey ? fieldValue(r, fonteDadosFieldKey) : "")),
+    [filtered, fonteDadosFieldKey]
+  );
 
-  const barChartFor: Record<Exclude<ChartKey, "status" | "periodo">, { name: string; total: number }[]> = {
+  const barChartFor: Record<DistributionKey, { name: string; total: number }[]> = {
     gerencia: gerenciaData,
     instalacao: instalacaoData,
     sistema: sistemaData,
     responsavel: responsavelData,
+    fonteDados: fonteDadosData,
   };
 
   const drafts = useMemo(() => records.filter((r) => r.status === "rascunho").slice(0, 6), [records]);
@@ -289,8 +325,9 @@ export default function DashboardPage() {
     anoFilter,
     mesFilter,
   ].filter((v) => v !== ALL).length + (dateFrom ? 1 : 0) + (dateTo ? 1 : 0);
-  const enabledDistributions = (["gerencia", "instalacao", "sistema", "responsavel"] as const)
-    .filter((key) => prefs.charts.includes(key));
+  const enabledDistributions = DISTRIBUTION_KEYS.filter(
+    (key) => key === "fonteDados" || prefs.charts.includes(key)
+  );
   const visibleDistribution = enabledDistributions.includes(distributionKey)
     ? distributionKey
     : enabledDistributions[0];
@@ -430,10 +467,10 @@ export default function DashboardPage() {
         <section>
           <div className="mb-4 flex flex-col justify-between gap-3 sm:flex-row sm:items-end">
             <div><h2 className="text-lg font-semibold tracking-tight">Distribuições</h2><p className="text-sm text-muted-foreground">Compare os registros por dimensão</p></div>
-            <div className="flex overflow-x-auto border-b border-border">
+            <div className="flex max-w-full overflow-x-auto border-b border-border">
               {enabledDistributions.map((key) => (
                 <button key={key} onClick={() => setDistributionKey(key)} className={cn("whitespace-nowrap border-b-2 px-4 py-2 text-sm font-medium transition-colors", visibleDistribution === key ? "border-primary text-primary" : "border-transparent text-muted-foreground hover:text-foreground")}>
-                  {({ gerencia: "Gerência", instalacao: "Instalação", sistema: "Sistema", responsavel: "Responsável" })[key]}
+                  {distributionLabels[key]}
                 </button>
               ))}
             </div>
