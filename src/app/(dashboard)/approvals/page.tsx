@@ -7,7 +7,7 @@ import { CheckCircle2, ChevronDown, Clock, MessageSquareWarning, XCircle } from 
 import { db } from "@/lib/firebase";
 import { useAuth } from "@/lib/auth-context";
 import { approvalsCol, recordsCol, createNotifications, writeAuditLog } from "@/lib/firestore-helpers";
-import { DEFAULT_FORM_ID, logFirestoreError } from "@/lib/forms";
+import { DEFAULT_FORM_ID, logFirestoreError, statusVariant } from "@/lib/forms";
 import type { AppRecord, Approval, ApprovalAction, FormDefinition, FormField, LogEntry } from "@/types";
 import { logsCol } from "@/lib/firestore-helpers";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -288,7 +288,7 @@ export default function ApprovalsPage() {
                       />
                       <span className="truncate">{a.recordNumber || a.recordId}</span>
                     </label>
-                    <Badge variant="warning">Pendente</Badge>
+                    <Badge variant={statusVariant.pendente}>Pendente</Badge>
                   </CardTitle>
                 </CardHeader>
                 <CardContent className="flex flex-col gap-4">

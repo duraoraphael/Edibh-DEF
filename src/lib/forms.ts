@@ -14,14 +14,24 @@ export const statusLabels: Record<RecordStatus, string> = {
   concluido_direto: "Concluído direto",
 };
 
-export const statusVariant: Record<RecordStatus, "default" | "warning" | "success" | "destructive" | "secondary"> = {
+export const statusVariant: Record<RecordStatus, "default" | "warning" | "destructive" | "secondary" | "statusAnalysis" | "statusProgress" | "statusComplete" | "statusDirect"> = {
   rascunho: "secondary",
-  pendente: "warning",
-  aprovado: "success",
+  pendente: "statusAnalysis",
+  aprovado: "statusProgress",
   rejeitado: "destructive",
   reajuste: "warning",
-  concluido: "success",
-  concluido_direto: "success",
+  concluido: "statusComplete",
+  concluido_direto: "statusDirect",
+};
+
+export const statusIndicatorClass: Record<RecordStatus, string> = {
+  rascunho: "bg-slate-400",
+  pendente: "border border-slate-300 bg-white dark:border-slate-400 dark:bg-white",
+  aprovado: "bg-amber-300",
+  rejeitado: "bg-red-600",
+  reajuste: "bg-amber-600",
+  concluido: "bg-emerald-500",
+  concluido_direto: "bg-green-800",
 };
 
 export function fieldValue(r: AppRecord, key: string): string {

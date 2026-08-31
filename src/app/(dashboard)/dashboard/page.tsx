@@ -42,8 +42,8 @@ import {
 import { db } from "@/lib/firebase";
 import { useAuth } from "@/lib/auth-context";
 import { recordsCol } from "@/lib/firestore-helpers";
-import { DEFAULT_FORM_ID, fieldValue, logFirestoreError, migrateLegacyRecordNumbers, statusLabels, statusVariant } from "@/lib/forms";
-import type { AppRecord, FormDefinition, FormField } from "@/types";
+import { DEFAULT_FORM_ID, fieldValue, logFirestoreError, migrateLegacyRecordNumbers, statusIndicatorClass, statusLabels, statusVariant } from "@/lib/forms";
+import type { AppRecord, FormDefinition, FormField, RecordStatus } from "@/types";
 import { cn } from "@/lib/utils";
 
 const ALL = "todos";
@@ -268,12 +268,15 @@ export default function DashboardPage() {
   }, [filtered]);
 
   const pieData = useMemo(() => {
-    const map = new Map<string, number>();
+    const map = new Map<RecordStatus, number>();
     filtered.forEach((r) => {
-      const label = statusLabels[r.status] ?? r.status;
-      map.set(label, (map.get(label) || 0) + 1);
+      map.set(r.status, (map.get(r.status) || 0) + 1);
     });
-    return Array.from(map.entries()).map(([name, value]) => ({ name, value }));
+    return Array.from(map.entries()).map(([status, value]) => ({
+      name: statusLabels[status] ?? status,
+      value,
+      indicatorClass: statusIndicatorClass[status],
+    }));
   }, [filtered]);
 
   const gerenciaData = useMemo(() => groupCount(filtered, (r) => fieldValue(r, "gerencia")), [filtered]);
@@ -476,7 +479,7 @@ export default function DashboardPage() {
               ) : pieData.length === 0 ? (
                 <EmptyState text="Nenhum dado disponível" />
               ) : (
-                <DistributionList data={pieData.map((item) => ({ name: item.name, total: item.value }))} />
+                <DistributionList data={pieData.map((item) => ({ name: item.name, total: item.value, indicatorClass: item.indicatorClass }))} />
               )}
             </CardContent>
           </Card>
@@ -555,7 +558,7 @@ export default function DashboardPage() {
               pendingRecords.map((r) => (
                 <div key={r.id} className="flex items-center justify-between gap-3 py-3">
                   <div className="min-w-0"><p className="truncate text-sm font-medium">{r.recordNumber || r.id}</p><p className="truncate text-xs text-muted-foreground">{r.authorName || "—"}</p></div>
-                  <Badge variant="warning">{statusLabels.pendente}</Badge>
+                  <Badge variant={statusVariant.pendente}>{statusLabels.pendente}</Badge>
                 </div>
               ))
             )}
@@ -621,13 +624,13 @@ export default function DashboardPage() {
   );
 }
 
-function DistributionList({ data }: { data: { name: string; total: number }[] }) {
+function DistributionList({ data }: { data: { name: string; total: number; indicatorClass?: string }[] }) {
   const total = data.reduce((sum, item) => sum + item.total, 0);
   return (
     <div className="flex max-h-80 flex-col gap-4 overflow-y-auto pr-2">
       {data.map((item) => {
         const percentage = total ? Math.round((item.total / total) * 1000) / 10 : 0;
-        return <div key={item.name}><div className="mb-1.5 flex items-center justify-between gap-3 text-sm"><span className="truncate text-foreground" title={item.name}>{item.name}</span><span className="shrink-0 tabular-nums text-muted-foreground"><strong className="font-medium text-foreground">{item.total}</strong> · {percentage}%</span></div><div className="h-1.5 overflow-hidden rounded-sm bg-muted"><div className="h-full rounded-sm bg-primary/75" style={{ width: `${percentage}%` }} /></div></div>;
+        return <div key={item.name}><div className="mb-1.5 flex items-center justify-between gap-3 text-sm"><span className="truncate text-foreground" title={item.name}>{item.name}</span><span className="shrink-0 tabular-nums text-muted-foreground"><strong className="font-medium text-foreground">{item.total}</strong> · {percentage}%</span></div><div className="h-1.5 overflow-hidden rounded-sm bg-muted"><div className={cn("h-full rounded-sm", item.indicatorClass || "bg-primary/75")} style={{ width: `${percentage}%` }} /></div></div>;
       })}
     </div>
   );

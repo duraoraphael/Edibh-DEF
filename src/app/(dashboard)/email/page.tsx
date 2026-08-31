@@ -8,7 +8,7 @@ import { Download, Mail, X } from "lucide-react";
 import { db } from "@/lib/firebase";
 import { emailLogsCol, recordsCol, usersCol } from "@/lib/firestore-helpers";
 import { useAuth } from "@/lib/auth-context";
-import { DEFAULT_FORM_ID, logFirestoreError, statusLabels } from "@/lib/forms";
+import { DEFAULT_FORM_ID, logFirestoreError, statusLabels, statusVariant } from "@/lib/forms";
 import type { AppRecord, FormDefinition, User } from "@/types";
 import { buildEmailSubject, renderEmailReportHtml } from "@/components/email/email-report-template";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -339,7 +339,7 @@ export default function EmailPage() {
               <div className="flex flex-col gap-2 rounded-lg border border-border p-3 text-sm">
                 <div className="flex items-center justify-between">
                   <span className="font-medium">{selected.recordNumber || selected.id}</span>
-                  <Badge>{statusLabels[selected.status]}</Badge>
+                  <Badge variant={statusVariant[selected.status]}>{statusLabels[selected.status]}</Badge>
                 </div>
                 <p className="text-xs text-muted-foreground">Responsável: {selected.authorName || "—"}</p>
                 <p className="text-xs text-muted-foreground">

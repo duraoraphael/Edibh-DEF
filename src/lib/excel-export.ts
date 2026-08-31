@@ -11,12 +11,12 @@ const BORDER_COLOR = "FFD1D5DB";
 
 const statusColors: Record<RecordStatus, { fg: string; bg: string }> = {
   rascunho: { fg: "FF4B5563", bg: "FFE5E7EB" },
-  pendente: { fg: "FF92400E", bg: "FFFEF3C7" },
-  aprovado: { fg: "FF166534", bg: "FFDCFCE7" },
+  pendente: { fg: "FF0F172A", bg: "FFFFFFFF" },
+  aprovado: { fg: "FF451A03", bg: "FFFDE68A" },
   rejeitado: { fg: "FF991B1B", bg: "FFFEE2E2" },
   reajuste: { fg: "FF92400E", bg: "FFFEF3C7" },
   concluido: { fg: "FF166534", bg: "FFDCFCE7" },
-  concluido_direto: { fg: "FF166534", bg: "FFDCFCE7" },
+  concluido_direto: { fg: "FFFFFFFF", bg: "FF166534" },
 };
 
 const thinBorder = { style: "thin" as const, color: { argb: BORDER_COLOR } };
