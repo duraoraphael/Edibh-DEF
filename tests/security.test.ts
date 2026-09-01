@@ -44,3 +44,36 @@ test("Firebase rules retain deny-by-default and protected role/attachment checks
   );
   assert.match(storage, /request\.auth\.uid == userId \|\| isPrivileged\(\)/);
 });
+
+test("F1: reading internal collections requires an approved account, not just a signed-in one", async () => {
+  const firestore = await readFile(new URL("../firestore.rules", import.meta.url), "utf8");
+  const storage = await readFile(new URL("../storage.rules", import.meta.url), "utf8");
+
+  // A pending/rejected self-signup must never satisfy isApprovedUser().
+  assert.match(firestore, /function isApprovedUser\(\)/);
+  assert.match(firestore, /userStatus\(\) == 'ativo'/);
+  // Legacy accounts predating the `status` field stay grandfathered in.
+  assert.match(firestore, /data\.get\('status', 'ativo'\)/);
+
+  for (const collectionMatch of [
+    /match \/users\/\{userId\} \{\s*allow read: if ([^;]+);/,
+    /match \/records\/\{recordId\} \{\s*allow read: if ([^;]+);/,
+    /match \/approvals\/\{approvalId\} \{\s*allow read: if ([^;]+);/,
+    /match \/formFields\/\{formId\} \{\s*allow read: if ([^;]+);/,
+  ]) {
+    const match = collectionMatch.exec(firestore);
+    assert.ok(match, `expected to find a read rule matching ${collectionMatch}`);
+    assert.doesNotMatch(match![1], /^isSignedIn\(\)$/, `read rule "${match![1]}" must not be bare isSignedIn()`);
+  }
+
+  // Role checks (isAdmin/isGerente/isTecnico) must themselves require
+  // approval — otherwise a pending account with role "tecnico" pre-set could
+  // still exercise write privileges even though it can't read anything yet.
+  assert.match(firestore, /function isAdmin\(\) \{\s*return isApprovedUser\(\) && role\(\) == 'admin';/);
+  assert.match(firestore, /function isActiveNonViewer\(\)/);
+
+  // Self-signup cannot mass-assign itself an approved/privileged account.
+  assert.match(firestore, /request\.resource\.data\.status == 'pendente'/);
+
+  assert.match(storage, /function isApprovedUser\(\)/);
+});

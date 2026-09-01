@@ -8,10 +8,13 @@
     "start": "next start",
     "lint": "eslint",
     "typecheck": "tsc --noEmit",
-    "test": "npm run test:email && npm run test:record-number && npm run test:security && playwright test",
-    "test:email": "node --experimental-strip-types --test tests/email-inline.test.ts",
-    "test:record-number": "node --experimental-strip-types --test tests/record-number.test.ts",
-    "test:security": "node --experimental-strip-types --test tests/security.test.ts"
+    "test": "npm run test:email && npm run test:record-number && npm run test:security && npm run test:attachment-url && npm run test:email-template-xss && npm run test:rules && playwright test",
+    "test:email": "node --experimental-strip-types --import ./tests/support/register.mjs --test tests/email-inline.test.ts",
+    "test:record-number": "node --experimental-strip-types --import ./tests/support/register.mjs --test tests/record-number.test.ts",
+    "test:security": "node --experimental-strip-types --import ./tests/support/register.mjs --test tests/security.test.ts",
+    "test:attachment-url": "node --experimental-strip-types --import ./tests/support/register.mjs --test tests/attachment-url.test.ts",
+    "test:email-template-xss": "node --experimental-strip-types --import ./tests/support/register.mjs --test tests/email-template-xss.test.ts",
+    "test:rules": "firebase emulators:exec --only firestore,storage --project edibh-def-rules-test \"node --experimental-strip-types --import ./tests/support/register.mjs --test tests/firestore-rules.test.ts tests/storage-rules.test.ts\""
   },
   "dependencies": {
     "@radix-ui/react-avatar": "^1.2.1",
@@ -50,6 +53,7 @@
     "uuid": "^11.1.1"
   },
   "devDependencies": {
+    "@firebase/rules-unit-testing": "^5.0.2",
     "@playwright/test": "^1.61.1",
     "@tailwindcss/postcss": "^4",
     "@types/node": "^20",
@@ -57,6 +61,7 @@
     "@types/react-dom": "^19",
     "eslint": "^9",
     "eslint-config-next": "^16.3.0",
+    "firebase-tools": "^15.28.2",
     "tailwindcss": "^4",
     "typescript": "^5"
   }

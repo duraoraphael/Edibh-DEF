@@ -29,9 +29,12 @@ export function isSameOrigin(req: NextRequest): boolean {
     }
   }
 
-  // Non-browser or same-origin navigations may omit Origin; fall back to
-  // Referer. If neither header is present, treat as same-origin (e.g. some
-  // same-site requests legitimately omit both) rather than break normal use.
+  // Fall back to Referer when Origin is absent (some same-origin requests
+  // legitimately omit it). If NEITHER header is present, fail closed: a real
+  // same-origin fetch() from this app's own client code always sends at
+  // least one of them, so their total absence means the request did not
+  // originate from the browser running this app — never treat that as
+  // authorized.
   const referer = req.headers.get("referer");
   if (referer) {
     try {
@@ -41,7 +44,7 @@ export function isSameOrigin(req: NextRequest): boolean {
     }
   }
 
-  return true;
+  return false;
 }
 
 /**

@@ -19,6 +19,7 @@ import {
   sanitizeForFirestore,
 } from "@/lib/forms";
 import { createNotifications, getUserIdsByRoles, writeAuditLog } from "@/lib/firestore-helpers";
+import { isAllowedAttachmentUrl } from "@/lib/security/url";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -541,7 +542,9 @@ export default function NewRecordPage() {
                 className="text-sm"
               />
               {uploadProgress[field.key] !== undefined && <Progress value={uploadProgress[field.key]} />}
-              {typeof values[field.key] === "string" && values[field.key] ? (
+              {typeof values[field.key] === "string" &&
+              values[field.key] &&
+              isAllowedAttachmentUrl(values[field.key] as string) ? (
                 <a
                   href={values[field.key] as string}
                   target="_blank"

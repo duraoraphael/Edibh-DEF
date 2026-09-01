@@ -13,8 +13,19 @@ service firebase.storage {
         : null;
     }
 
+    // Mirrors firestore.rules' isApprovedUser(): a legacy account with no
+    // `status` field is grandfathered in as approved; a freshly
+    // self-registered account starts at 'pendente' and stays unapproved
+    // until an admin flips it to 'ativo'.
+    function isApprovedUser() {
+      return isSignedIn() && (
+        !('status' in firestore.get(/databases/(default)/documents/users/$(request.auth.uid)).data)
+        || firestore.get(/databases/(default)/documents/users/$(request.auth.uid)).data.status == 'ativo'
+      );
+    }
+
     function isPrivileged() {
-      return role() == 'admin' || role() == 'gerente';
+      return isApprovedUser() && (role() == 'admin' || role() == 'gerente');
     }
 
     function isValidAttachment() {
