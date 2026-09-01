@@ -2,19 +2,42 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { onSnapshot, query, where } from "firebase/firestore";
-import { BriefcaseBusiness, CalendarDays } from "lucide-react";
+import { doc, onSnapshot, query, where } from "firebase/firestore";
+import { BriefcaseBusiness, CalendarDays, Database } from "lucide-react";
 import { toast } from "sonner";
+import { db } from "@/lib/firebase";
 import { recordsCol, setRecordCase } from "@/lib/firestore-helpers";
-import { fieldValue, getFirebaseErrorMessage, logFirestoreError } from "@/lib/forms";
+import { DEFAULT_FORM_ID, fieldValue, getFirebaseErrorMessage, logFirestoreError } from "@/lib/forms";
 import { useAuth } from "@/lib/auth-context";
-import type { AppRecord } from "@/types";
+import type { AppRecord, FormDefinition } from "@/types";
 import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
 import { CaseCheckbox } from "@/components/records/case-checkbox";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Skeleton } from "@/components/ui/skeleton";
 import { StatusBadge } from "@/components/ui/status-badge";
+
+function normalizeFieldName(value: string): string {
+  return value
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "");
+}
+
+function DataSourceInfo({ value }: { value?: string }) {
+  return (
+    <div className="w-full min-w-0 rounded-lg border border-primary/30 bg-primary/[0.04] px-3 py-2.5">
+      <p className="text-xs font-semibold text-primary">Fonte de Dados</p>
+      <div className="mt-1 flex min-w-0 items-start gap-2 text-sm">
+        <Database className="mt-0.5 h-4 w-4 shrink-0 text-primary" aria-hidden="true" />
+        <strong className="min-w-0 break-words font-semibold leading-snug">{value || "Não informado"}</strong>
+      </div>
+      <p className="mt-1 text-[11px] text-muted-foreground">Dados informados no formulário</p>
+    </div>
+  );
+}
 
 export default function CasesPage() {
   const router = useRouter();
@@ -23,6 +46,16 @@ export default function CasesPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [updatingIds, setUpdatingIds] = useState<Set<string>>(new Set());
+  const [dataSourceFieldKey, setDataSourceFieldKey] = useState<string | null>(null);
+
+  useEffect(() => {
+    return onSnapshot(doc(db, "formFields", DEFAULT_FORM_ID), (snapshot) => {
+      if (!snapshot.exists()) return setDataSourceFieldKey(null);
+      const form = snapshot.data() as FormDefinition;
+      const field = form.fields.find((item) => normalizeFieldName(item.label) === "fonte_de_dados");
+      setDataSourceFieldKey(field?.key ?? null);
+    });
+  }, []);
 
   useEffect(() => {
     const unsubscribe = onSnapshot(
@@ -100,7 +133,7 @@ export default function CasesPage() {
       ) : (
         <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
           {records.map((record) => (
-            <Card key={record.id} className="flex cursor-pointer flex-col gap-4 p-5 transition-colors hover:border-primary/40" onClick={() => router.push(`/records?record=${record.id}`)}>
+            <Card key={record.id} className="flex cursor-pointer flex-col gap-4 p-5 transition-colors hover:border-primary/40" onClick={() => router.push(`/records?record=${record.id}&returnTo=${encodeURIComponent("/cases")}`)}>
               <div className="flex items-start justify-between gap-3">
                 <div><p className="text-xs text-muted-foreground">Fluxo</p><h2 className="font-semibold">{record.recordNumber || record.id}</h2></div>
                 <StatusBadge status={record.status} />
@@ -114,6 +147,7 @@ export default function CasesPage() {
                 <span className="flex items-center gap-1"><CalendarDays className="h-3.5 w-3.5" />{record.createdAt ? new Date(record.createdAt).toLocaleDateString("pt-BR") : "Sem data"}</span>
                 {record.updatedAt && <span>Atualizado: {new Date(record.updatedAt).toLocaleDateString("pt-BR")}</span>}
               </div>
+              <DataSourceInfo value={dataSourceFieldKey ? fieldValue(record, dataSourceFieldKey) : undefined} />
               <div onClick={(event) => event.stopPropagation()}>
                 <CaseCheckbox checked disabled={!canChange(record) || updatingIds.has(record.id)} recordLabel={record.recordNumber || record.id} onCheckedChange={(checked) => { if (!checked) unmarkCase(record); }} />
               </div>

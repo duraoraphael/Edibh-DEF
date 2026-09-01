@@ -175,6 +175,8 @@ export default function RecordsHistoryPage() {
           setSelected((current) => current?.id === requestedRecordId
             ? current
             : nextRecords.find((record) => record.id === requestedRecordId && !record.deletedAt) || null);
+        } else {
+          setSelected(null);
         }
         setLoading(false);
       },
@@ -782,7 +784,23 @@ export default function RecordsHistoryPage() {
 
   function closeDetails() {
     setSelected(null);
-    if (searchParams.has("record")) router.replace("/records");
+    if (!searchParams.has("record")) return;
+    const returnTo = searchParams.get("returnTo");
+    if (returnTo === "/cases") {
+      router.replace(returnTo);
+    } else if (returnTo === "/records") {
+      router.back();
+    } else {
+      router.replace("/records");
+    }
+  }
+
+  function openDetails(record: AppRecord) {
+    setSelected(record);
+    const params = new URLSearchParams(searchParams.toString());
+    params.set("record", record.id);
+    params.set("returnTo", "/records");
+    router.push(`/records?${params.toString()}`);
   }
 
   function canDuplicate() {
@@ -1012,7 +1030,7 @@ export default function RecordsHistoryPage() {
                   key={r.id}
                   record={r}
                   dense={dense}
-                  onClick={() => setSelected(r)}
+                  onClick={() => openDetails(r)}
                   selectable={(view === "ativos" && canDelete()) || (view === "removidos" && canPermanentDelete())}
                   selected={selectedIds.has(r.id)}
                   onToggleSelected={() => toggleSelected(r.id)}
@@ -1032,7 +1050,7 @@ export default function RecordsHistoryPage() {
                         </Button>
                       </DropdownMenuTrigger>
                       <DropdownMenuContent align="end">
-                        <DropdownMenuItem onClick={() => setSelected(r)}>
+                        <DropdownMenuItem onClick={() => openDetails(r)}>
                           <Eye className="h-4 w-4" />
                           Visualizar
                         </DropdownMenuItem>
