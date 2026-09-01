@@ -11,6 +11,7 @@ import { useAuth } from "@/lib/auth-context";
 import { DEFAULT_FORM_ID, logFirestoreError, statusLabels, statusVariant } from "@/lib/forms";
 import type { AppRecord, FormDefinition, User } from "@/types";
 import { buildEmailSubject, renderEmailReportHtml } from "@/components/email/email-report-template";
+import { isAllowedAttachmentUrl } from "@/lib/security/url";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -117,7 +118,11 @@ export default function EmailPage() {
   const images = useMemo(() => {
     if (!selected) return [];
     return (selected.attachments || [])
-      .filter((a) => /\.(png|jpe?g|gif|webp|svg)$/i.test(a.name) || a.contentType?.startsWith("image/"))
+      .filter(
+        (a) =>
+          (/\.(png|jpe?g|gif|webp|svg)$/i.test(a.name) || a.contentType?.startsWith("image/")) &&
+          isAllowedAttachmentUrl(a.url)
+      )
       .map((a) => ({ name: a.name, url: a.url }));
   }, [selected]);
 
@@ -247,7 +252,9 @@ export default function EmailPage() {
       return;
     }
     const imgs = (selected.attachments || []).filter(
-      (a) => /\.(png|jpe?g|gif|webp|svg)$/i.test(a.name) || a.contentType?.startsWith("image/")
+      (a) =>
+        (/\.(png|jpe?g|gif|webp|svg)$/i.test(a.name) || a.contentType?.startsWith("image/")) &&
+        isAllowedAttachmentUrl(a.url)
     );
     if (imgs.length === 0) {
       toast.error("Este registro não possui imagens anexadas");
@@ -447,6 +454,15 @@ export default function EmailPage() {
               <iframe
                 title="Prévia antes de abrir o Outlook"
                 srcDoc={previewHtml}
+                // Empty sandbox: this iframe only ever renders a static HTML
+                // report (tables/images/text) for visual preview and
+                // clipboard copy — it never needs to run script, submit a
+                // form, or share the parent's origin. Deliberately omits
+                // both allow-scripts and allow-same-origin so an attacker
+                // value smuggled into attachments[].url (see
+                // email-report-template.ts) has nowhere to execute even if
+                // it slipped past the URL allowlist there.
+                sandbox=""
                 className="absolute left-0 top-0 block h-[1600px] w-[660px] origin-top-left scale-75 border-0 bg-white shadow-sm"
               />
             </div>

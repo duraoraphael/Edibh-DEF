@@ -29,6 +29,14 @@ To learn more about Next.js, take a look at the following resources:
 
 You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
 
+## Testes
+
+`npm test` runs unit tests, the Firestore/Storage security rules suite against the real Firebase Emulator (`tests/firestore-rules.test.ts`, `tests/storage-rules.test.ts`), and Playwright. The rules suite needs a JDK on `PATH` (the emulator is JVM-based) — install one (e.g. Temurin 21) if `npm run test:rules` fails with "could not spawn `java -version`". Everything else has no such requirement.
+
+## Dependências
+
+`xlsx` is installed straight from SheetJS's own CDN (`https://cdn.sheetjs.com/...`) instead of the npm registry — this is the upstream maintainer's own documented distribution channel (the `xlsx` npm package was pulled by its author). package.json pins the exact version in the URL itself (no floating range) and package-lock.json records a SHA-512 integrity hash for the tarball, so `npm install` verifies it hasn't changed. Because it isn't a registry package, some SCA tools that only scan npm-resolved dependencies may not see it — check `npm audit` output for it manually on every SheetJS version bump, and re-pin the URL (and let the lockfile hash update) rather than widening it to a range.
+
 ## Deploy on Vercel
 
 The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.

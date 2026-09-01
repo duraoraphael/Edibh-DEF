@@ -123,6 +123,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       name,
       email,
       role: "visualizador",
+      status: "pendente",
       avatarUrl: "",
       department: "",
       lastActive: serverTimestamp(),

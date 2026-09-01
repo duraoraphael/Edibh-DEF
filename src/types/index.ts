@@ -12,7 +12,16 @@ export interface User {
   role: UserRole;
   avatarUrl?: string;
   department?: string;
-  status?: "ativo" | "inativo";
+  /**
+   * Approval gate for self-registered accounts. Absent (legacy accounts
+   * created before this field existed) is treated as "ativo" by both the
+   * Firestore/Storage rules and the UI below — only new signups start at
+   * "pendente" and need an admin to flip them to "ativo" before they can
+   * read any internal data. "inativo"/"rejeitado" both deny access; they are
+   * kept distinct so admins can tell "was active, now disabled" apart from
+   * "never approved".
+   */
+  status?: "pendente" | "ativo" | "inativo" | "rejeitado";
   lastActive?: string | FirestoreTimestampLike;
   lastLogin?: string | FirestoreTimestampLike;
   createdAt?: string;

@@ -10,6 +10,7 @@ import { approvalsCol, recordsCol, createNotifications, writeAuditLog } from "@/
 import { DEFAULT_FORM_ID, logFirestoreError, statusVariant } from "@/lib/forms";
 import type { AppRecord, Approval, ApprovalAction, FormDefinition, FormField, LogEntry } from "@/types";
 import { logsCol } from "@/lib/firestore-helpers";
+import { AttachmentLink } from "@/components/ui/attachment-link";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -351,15 +352,13 @@ export default function ApprovalsPage() {
                           <p className="mb-2 text-xs font-semibold uppercase text-muted-foreground">Anexos</p>
                           <div className="flex flex-wrap gap-2">
                             {rec.attachments.map((att, i) => (
-                              <a
+                              <AttachmentLink
                                 key={att.id || `${att.name}-${i}`}
-                                href={att.url}
-                                target="_blank"
-                                rel="noreferrer"
+                                attachment={att}
                                 className="rounded-md border border-border px-2 py-1 text-xs text-primary hover:bg-primary-50"
                               >
                                 {att.name}
-                              </a>
+                              </AttachmentLink>
                             ))}
                           </div>
                         </div>

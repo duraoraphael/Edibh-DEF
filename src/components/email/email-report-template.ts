@@ -1,4 +1,6 @@
 import type { AppRecord, FormField } from "@/types";
+import { escapeHtml } from "@/lib/security/html";
+import { isAllowedAttachmentUrl } from "@/lib/security/url";
 
 const NAVY = "#0b2540";
 const GREEN = "#0e7a4b";
@@ -16,14 +18,6 @@ function formatEmailFieldValue(field: FormField, value: unknown): string {
     if (match) return `${match[3]}/${match[2]}/${match[1]}`;
   }
   return formatFieldValue(value);
-}
-
-function escapeHtml(s: string): string {
-  return s
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;");
 }
 
 export interface EmailImage {
@@ -98,6 +92,15 @@ export function renderEmailReportHtml({
     .sort((a, b) => a.order - b.order)
     .filter((f) => f.type === "textarea");
 
+  // Firestore only enforces document ownership on `attachments`, not the
+  // shape/content of each entry's `url` — a value written outside the normal
+  // upload flow (direct SDK call) could be anything. Images without a
+  // pre-built `cid` (server-side inline path) must have their raw URL
+  // validated against the Firebase Storage allowlist before it can appear in
+  // the generated HTML at all; anything else is dropped rather than
+  // rendered with an empty/broken `src`.
+  const safeImages = images.filter((img) => img.cid || isAllowedAttachmentUrl(img.url));
+
   const dataCardsRows: string[] = [];
   for (let i = 0; i < generalFields.length; i += 2) {
     const a = generalFields[i];
@@ -146,11 +149,11 @@ export function renderEmailReportHtml({
   </tr>` : "";
 
   let imagesHtml = "";
-  if (images.length) {
+  if (safeImages.length) {
     const perRow = 3;
     const rows: string[] = [];
-    for (let i = 0; i < images.length; i += perRow) {
-      const chunk = images.slice(i, i + perRow);
+    for (let i = 0; i < safeImages.length; i += perRow) {
+      const chunk = safeImages.slice(i, i + perRow);
       rows.push(`
         <tr>
           ${chunk
@@ -160,7 +163,7 @@ export function renderEmailReportHtml({
             <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color:#ffffff;border:1px solid #e5e7eb;border-radius:8px;">
               <tr>
                 <td style="padding:6px;">
-                  <img src="${img.cid ? `cid:${img.cid}` : img.url}" alt="${escapeHtml(img.name)}" width="180" height="120" style="display:block;border:0;outline:none;text-decoration:none;width:100%;height:120px;object-fit:cover;border-radius:6px;" />
+                  <img src="${img.cid ? `cid:${img.cid}` : escapeHtml(img.url)}" alt="${escapeHtml(img.name)}" width="180" height="120" style="display:block;border:0;outline:none;text-decoration:none;width:100%;height:120px;object-fit:cover;border-radius:6px;" />
                 </td>
               </tr>
             </table>
@@ -177,7 +180,7 @@ export function renderEmailReportHtml({
           <tr>
             <td style="padding:0 0 8px 2px;">
               <span style="display:inline-block;width:4px;height:14px;background-color:${GREEN};vertical-align:middle;margin-right:8px;border-radius:2px;"></span>
-              <span style="font-family:Arial,Helvetica,sans-serif;font-size:14px;font-weight:bold;color:#0f172a;vertical-align:middle;">Imagens (${images.length})</span>
+              <span style="font-family:Arial,Helvetica,sans-serif;font-size:14px;font-weight:bold;color:#0f172a;vertical-align:middle;">Imagens (${safeImages.length})</span>
             </td>
           </tr>
           ${rows.join("")}

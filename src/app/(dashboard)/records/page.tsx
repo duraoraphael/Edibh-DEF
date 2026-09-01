@@ -51,6 +51,7 @@ import {
 import { ExcelImportDialog } from "@/components/records/excel-import-dialog";
 import { RecordRow } from "@/components/records/record-row";
 import { CaseCheckbox } from "@/components/records/case-checkbox";
+import { AttachmentImage, AttachmentLink, isImageAttachment } from "@/components/ui/attachment-link";
 import { Checkbox } from "@/components/ui/checkbox";
 import { generateRecordPdf, generateRecordsTablePdf } from "@/lib/pdf";
 import type { AppRecord, FormDefinition, FormField, LogEntry, RecordStatus, User } from "@/types";
@@ -760,6 +761,17 @@ export default function RecordsHistoryPage() {
     return profile.role === "tecnico" && r.authorId === user?.uid;
   }
 
+  // The Firestore rules only let a tecnico move their own record from
+  // "rascunho" or "reajuste" back to "pendente" — every other status is
+  // reserved for admin/gerente decisions. Opening the edit/resubmit form for
+  // an already pendente/aprovado/rejeitado record would just fail on submit
+  // with permission-denied, so the menu item is hidden instead.
+  function canResubmit(r: AppRecord) {
+    if (!canEdit(r)) return false;
+    if (profile?.role !== "tecnico") return true;
+    return r.status === "rascunho" || r.status === "reajuste";
+  }
+
   function canToggleCase(r: AppRecord) {
     if (!profile) return false;
     if (profile.role === "admin" || profile.role === "gerente") return true;
@@ -1054,7 +1066,7 @@ export default function RecordsHistoryPage() {
                           <Eye className="h-4 w-4" />
                           Visualizar
                         </DropdownMenuItem>
-                        {view === "ativos" && canEdit(r) && (
+                        {view === "ativos" && canResubmit(r) && (
                           <DropdownMenuItem onClick={() => router.push(`/records/new?id=${r.id}`)}>
                             <Pencil className="h-4 w-4" />
                             Editar
@@ -1195,29 +1207,22 @@ export default function RecordsHistoryPage() {
                       <p className="text-sm text-muted-foreground">Nenhum anexo</p>
                     ) : (
                       <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
-                        {selected.attachments.map((a, i) => {
-                          const isImage =
-                            /\.(png|jpe?g|gif|webp)$/i.test(a.name) || a.contentType?.startsWith("image/");
-                          return (
-                            <a
-                              key={a.id || `${a.name}-${i}`}
-                              href={a.url}
-                              target="_blank"
-                              rel="noreferrer"
-                              className="flex flex-col gap-1 rounded-lg border border-border p-2 hover:border-primary"
-                            >
-                              {isImage ? (
-                                // eslint-disable-next-line @next/next/no-img-element
-                                <img src={a.url} alt={a.name} className="h-24 w-full rounded-md object-cover" />
-                              ) : (
-                                <div className="flex h-24 w-full items-center justify-center rounded-md bg-muted text-xs text-muted-foreground">
-                                  Arquivo
-                                </div>
-                              )}
-                              <span className="truncate text-xs">{a.name}</span>
-                            </a>
-                          );
-                        })}
+                        {selected.attachments.map((a, i) => (
+                          <AttachmentLink
+                            key={a.id || `${a.name}-${i}`}
+                            attachment={a}
+                            className="flex flex-col gap-1 rounded-lg border border-border p-2 hover:border-primary"
+                          >
+                            {isImageAttachment(a) ? (
+                              <AttachmentImage attachment={a} alt={a.name} className="h-24 w-full rounded-md object-cover" />
+                            ) : (
+                              <div className="flex h-24 w-full items-center justify-center rounded-md bg-muted text-xs text-muted-foreground">
+                                Arquivo
+                              </div>
+                            )}
+                            <span className="truncate text-xs">{a.name}</span>
+                          </AttachmentLink>
+                        ))}
                       </div>
                     )}
                   </div>

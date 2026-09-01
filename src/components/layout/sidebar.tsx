@@ -60,7 +60,11 @@ const groups: NavGroup[] = [
   {
     label: "Integrações",
     icon: Plug,
-    items: [{ label: "SharePoint", href: "/sharepoint", icon: Share2, roles: ["admin"] }],
+    // Kept in sync with allowedRoutesByRole (forms.ts) and the "settings"
+    // write rule (firestore.rules), both of which already allow gerente —
+    // hiding the link only from gerente here would contradict what the
+    // route guard and Firestore rules actually permit.
+    items: [{ label: "SharePoint", href: "/sharepoint", icon: Share2, roles: ["admin", "gerente"] }],
   },
   {
     label: "Conta",

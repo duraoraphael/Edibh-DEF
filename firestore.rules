@@ -11,45 +11,86 @@
         return get(/databases/$(database)/documents/users/$(request.auth.uid));
       }
 
+      // Approval gate, independent of role. A brand-new self-registered
+      // account is created with status == 'pendente' (see the `users` create
+      // rule below) and must stay unable to read internal data until an admin
+      // flips it to 'ativo'. Accounts created before this field existed have
+      // no `status` at all — `.get('status', 'ativo')` treats that legacy,
+      // undefined case as already-approved so no existing user is locked out
+      // by this change; only new self-signups start gated.
+      function userStatus() {
+        return userDoc().data.get('status', 'ativo');
+      }
+
+      function isApprovedUser() {
+        return isSignedIn() && userStatus() == 'ativo';
+      }
+
       function role() {
         return isSignedIn() ? userDoc().data.role : null;
       }
 
+      // Every role check below requires isApprovedUser() first: a pending or
+      // rejected account has a `role` value sitting in its profile (usually
+      // 'visualizador') but must never be able to exercise it.
       function isAdmin() {
-        return role() == 'admin';
+        return isApprovedUser() && role() == 'admin';
       }
 
       function isGerente() {
-        return role() == 'gerente';
+        return isApprovedUser() && role() == 'gerente';
       }
 
       function isTecnico() {
-        return role() == 'tecnico';
+        return isApprovedUser() && role() == 'tecnico';
       }
 
       function isAdminOrGerente() {
         return isAdmin() || isGerente();
       }
 
+      // Equivalent to the old `isSignedIn() && role() != 'visualizador'` used
+      // to gate record/approval/counter creation, but also requires approval —
+      // a pending account must never be able to create records just because
+      // its (not-yet-meaningful) role happens not to be 'visualizador'.
+      function isActiveNonViewer() {
+        return isApprovedUser() && role() != 'visualizador';
+      }
+
       function isOwner(authorId) {
         return isSignedIn() && request.auth.uid == authorId;
       }
 
-      // users: everyone signed in can read (for author names, avatars); only
-      // admin may change roles, self may update own non-role profile fields.
+      // A técnico may only ever move their own record into 'pendente' (first
+      // submission from 'rascunho', or resubmission from 'reajuste') or leave
+      // the status untouched while editing other fields. Every other
+      // transition — including anything that would land on 'aprovado' or
+      // 'rejeitado' — is an admin/gerente-only decision.
+      function isTecnicoRecordStatusTransitionOk() {
+        return resource.data.status == request.resource.data.status
+          || (resource.data.status == 'rascunho' && request.resource.data.status == 'pendente')
+          || (resource.data.status == 'reajuste' && request.resource.data.status == 'pendente');
+      }
+
+      // users: self may always read their own profile (so a pending account
+      // can see its own status); reading anyone else's profile — including a
+      // `list` of the collection — requires approval. Only admin may change
+      // roles/status; self may update own non-role, non-status profile fields.
       match /users/{userId} {
-        allow read: if isSignedIn();
+        allow read: if isSignedIn() && (request.auth.uid == userId || isApprovedUser());
         allow create: if isSignedIn() && request.auth.uid == userId
           && request.resource.data.keys().hasOnly([
-            'name', 'email', 'role', 'avatarUrl', 'department', 'lastActive', 'createdAt'
+            'name', 'email', 'role', 'status', 'avatarUrl', 'department', 'lastActive', 'createdAt'
           ])
           && request.resource.data.role == 'visualizador'
+          && request.resource.data.status == 'pendente'
           && request.resource.data.email == request.auth.token.email;
         allow update: if (isAdmin()
             && request.resource.data.keys().hasOnly([
               'name', 'email', 'role', 'avatarUrl', 'department', 'status', 'lastActive', 'lastLogin', 'createdAt'
             ])
-            && request.resource.data.role in ['admin', 'gerente', 'tecnico', 'visualizador'])
+            && request.resource.data.role in ['admin', 'gerente', 'tecnico', 'visualizador']
+            && request.resource.data.status in ['pendente', 'ativo', 'inativo', 'rejeitado'])
           || (isSignedIn() && request.auth.uid == userId
               && request.resource.data.diff(resource.data).affectedKeys()
                 .hasOnly(['name', 'avatarUrl', 'department', 'lastActive']));
@@ -57,10 +98,13 @@
       }
 
       // records: admin/gerente full access; tecnico may create and may only
-      // edit/delete records they authored; visualizador is read-only.
+      // edit/delete records they authored; visualizador is read-only. Reading
+      // any record — including the author's own — requires an approved
+      // account, closing the gap where a freshly self-registered visitor
+      // could read every flow in the company before anyone reviewed them.
       match /records/{recordId} {
-        allow read: if isSignedIn();
-        allow create: if isSignedIn() && role() != 'visualizador'
+        allow read: if isApprovedUser();
+        allow create: if isActiveNonViewer()
           && request.resource.data.authorId == request.auth.uid
           && request.resource.data.status in ['rascunho', 'pendente']
           && request.resource.data.keys().hasOnly([
@@ -71,7 +115,7 @@
           || (isTecnico()
             && resource.data.authorId == request.auth.uid
             && request.resource.data.authorId == resource.data.authorId
-            && request.resource.data.status in ['rascunho', 'pendente', 'reajuste']
+            && isTecnicoRecordStatusTransitionOk()
             && !request.resource.data.diff(resource.data).affectedKeys()
               .hasAny(['deletedAt', 'deletedBy', 'deletedByName'])
             && (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['recordNumber'])
@@ -92,7 +136,7 @@
             return isTecnico()
               && get(/databases/$(database)/documents/records/$(recordId)).data.authorId == request.auth.uid;
           }
-          allow read: if isSignedIn();
+          allow read: if isApprovedUser();
           allow create, update, delete: if isAdminOrGerente() || ownsParentRecord();
         }
       }
@@ -102,36 +146,45 @@
       // needs get() on another document — safe even when the approval and its
       // parent record are written in the same atomic transaction, where a
       // get() could race against the record's own pending write. Admin/gerente
-      // always act on approvals; a tecnico may create/update the approval for
-      // a record they authored (needed so their own submission and their own
-      // status changes succeed).
+      // always act on approvals. A tecnico may create the approval for a
+      // record they authored (first submission), and may update it ONLY to
+      // resubmit after a requested "reajuste" back to 'pendente' — never to
+      // 'aprovado'/'rejeitado', which would forge an administrative decision.
       match /approvals/{approvalId} {
-        allow read: if isSignedIn();
+        allow read: if isApprovedUser();
         allow create: if (isAdminOrGerente() || (isTecnico()
             && request.resource.data.authorId == request.auth.uid
             && request.resource.data.status == 'pendente'
             && !request.resource.data.keys().hasAny(['reviewerId', 'reviewerName'])))
           && request.resource.data.authorId == getAfter(/databases/$(database)/documents/records/$(approvalId)).data.authorId;
-        allow update: if isAdminOrGerente()
-          && request.resource.data.authorId == getAfter(/databases/$(database)/documents/records/$(approvalId)).data.authorId
-          && request.resource.data.status in ['pendente', 'aprovado', 'rejeitado', 'reajuste', 'concluido', 'concluido_direto'];
+        allow update: if (isAdminOrGerente()
+            && request.resource.data.authorId == getAfter(/databases/$(database)/documents/records/$(approvalId)).data.authorId
+            && request.resource.data.status in ['pendente', 'aprovado', 'rejeitado', 'reajuste', 'concluido', 'concluido_direto'])
+          || (isTecnico()
+            && resource.data.authorId == request.auth.uid
+            && request.resource.data.authorId == request.auth.uid
+            && resource.data.status == 'reajuste'
+            && request.resource.data.status == 'pendente'
+            && !request.resource.data.keys().hasAny(['reviewerId', 'reviewerName']));
         allow delete: if isAdmin();
       }
 
-      // form definitions: admin/gerente manage fields; everyone reads (needed
-      // to render the "new record" form).
+      // form definitions: admin/gerente manage fields; every approved user
+      // reads (needed to render the "new record" form).
       match /formFields/{formId} {
-        allow read: if isSignedIn();
+        allow read: if isApprovedUser();
         allow write: if isAdminOrGerente();
 
         match /updates/{updateId} {
-          allow read: if isSignedIn();
+          allow read: if isApprovedUser();
           allow write: if isAdmin();
         }
       }
 
-      // audit log: append-only by any signed-in user (actions are always tied
-      // to the authenticated actor); no client may edit or delete history.
+      // audit log: append-only by any signed-in user (actions — notably
+      // Login/Logout — are always tied to the authenticated actor and must
+      // still be recorded for accounts still awaiting approval); no client may
+      // edit or delete history. Reading the log stays admin/gerente-only.
       match /logs/{logId} {
         allow read: if isAdminOrGerente();
         allow create: if isSignedIn()
@@ -173,18 +226,18 @@
       }
 
       // shared, per-year sequence counters used to generate record numbers
-      // ("recordCounter_2026", "recordCounter_2027", ...). Any signed-in
+      // ("recordCounter_2026", "recordCounter_2027", ...). Any approved,
       // non-visualizador user may advance a record counter (needed so a
       // tecnico's own submission can atomically claim the next sequential
       // number); every other setting stays admin/gerente-only.
       match /settings/{settingId} {
-        allow read: if isSignedIn();
+        allow read: if isApprovedUser();
         allow create: if isAdminOrGerente()
-          || (settingId.matches('recordCounter(_[0-9]{4})?') && isSignedIn() && role() != 'visualizador'
+          || (settingId.matches('recordCounter(_[0-9]{4})?') && isActiveNonViewer()
             && request.resource.data.keys().hasOnly(['value', 'year'])
             && request.resource.data.value is int && request.resource.data.value >= 0);
         allow update: if isAdminOrGerente()
-          || (settingId.matches('recordCounter(_[0-9]{4})?') && isSignedIn() && role() != 'visualizador'
+          || (settingId.matches('recordCounter(_[0-9]{4})?') && isActiveNonViewer()
             && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['value'])
             && request.resource.data.value is int
             && request.resource.data.value > resource.data.value
