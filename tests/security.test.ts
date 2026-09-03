@@ -31,10 +31,13 @@ test("Firebase rules retain deny-by-default and protected role/attachment checks
   ]);
   assert.doesNotMatch(firestore, /allow\s+(read|write)\s*:\s*if\s+true/);
   assert.match(firestore, /request\.resource\.data\.role == 'visualizador'/);
-  assert.match(firestore, /allow update: if isAdminOrGerente\(\)/);
+  assert.match(firestore, /allow update: if \(isAdminOrGerente\(\)/);
   assert.match(firestore, /resource\.data\.status == 'rascunho'/);
   assert.match(firestore, /request\.resource\.data\.status == 'pendente'/);
   assert.match(firestore, /request\.resource\.data\.recordNumber\.matches/);
+  assert.match(firestore, /function hasValidInitialSequence\(recordId\)/);
+  assert.match(firestore, /counter\.data\.lastRecordId == recordId/);
+  assert.match(firestore, /request\.resource\.data\.value == resource\.data\.value \+ 1/);
   assert.match(firestore, /affectedKeys\(\)\.hasOnly\(\['isCase', 'updatedAt'\]\)/);
   assert.match(firestore, /request\.resource\.data\.isCase is bool/);
   assert.match(firestore, /'concluido', 'concluido_direto'/);

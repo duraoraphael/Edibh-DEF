@@ -37,6 +37,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { cn } from "@/lib/utils";
+import { canUseEditedRecordNumber } from "@/lib/record-number";
 import type { AppRecord, AttachmentRef, FormDefinition, FormField, RecordStatus } from "@/types";
 
 function SectionCard({
@@ -126,6 +127,7 @@ export default function NewRecordPage() {
   const [existingAuthorId, setExistingAuthorId] = useState<string | null>(null);
   const [existingAuthorName, setExistingAuthorName] = useState<string | null>(null);
   const [manualRecordNumber, setManualRecordNumber] = useState("");
+  const [allowDuplicateFlowNumbers, setAllowDuplicateFlowNumbers] = useState(false);
   const isAdmin = profile?.role === "admin";
   const [uploadProgress, setUploadProgress] = useState<Record<string, number>>({});
   // Display label for each in-flight generic upload, keyed by the same id as
@@ -391,18 +393,33 @@ export default function NewRecordPage() {
       // the write is rejected for any reason, the number is never consumed
       // and nothing is left half-created.
       let recordNumber: string;
-      if (isAdmin && typed) {
-        if (typed !== existingRecordNumber && (await recordNumberExists(typed, draftId))) {
+      if (editId) {
+        const editedRecordNumber = isAdmin ? typed : existingRecordNumber;
+        if (!editedRecordNumber) {
+          toast.error("Informe o número do fluxo.");
+          setSubmitting(false);
+          return;
+        }
+        const duplicateExists = editedRecordNumber !== existingRecordNumber
+          && await recordNumberExists(editedRecordNumber, draftId);
+        if (!canUseEditedRecordNumber({
+          current: existingRecordNumber,
+          next: editedRecordNumber,
+          duplicateExists,
+          allowDuplicate: allowDuplicateFlowNumbers,
+        })) {
           toast.error(`O número de fluxo "${typed}" já está em uso. Informe outro número.`);
           setSubmitting(false);
           return;
         }
-        recordNumber = typed;
-        await saveRecordWithFixedNumber(draftId, recordNumber, buildRecordPayload, buildApprovalPayload);
-      } else if (existingRecordNumber) {
-        recordNumber = existingRecordNumber;
+        recordNumber = editedRecordNumber;
         await saveRecordWithFixedNumber(draftId, recordNumber, buildRecordPayload, buildApprovalPayload);
       } else {
+        if (existingRecordNumber) {
+          toast.error("Este fluxo já possui numeração. Abra-o pelo modo de edição.");
+          setSubmitting(false);
+          return;
+        }
         recordNumber = await createRecordWithSequentialNumber(draftId, buildRecordPayload, buildApprovalPayload);
       }
 
@@ -469,18 +486,30 @@ export default function NewRecordPage() {
 
       <SectionCard number={1} title="Dados Gerais">
         <div className="grid grid-cols-1 gap-5 md:grid-cols-2">
-          {isAdmin && (
+          {isAdmin && editId && (
             <div className="flex flex-col gap-1.5">
               <Label htmlFor="manual-record-number">Número do Fluxo</Label>
               <Input
                 id="manual-record-number"
                 value={manualRecordNumber}
                 onChange={(e) => setManualRecordNumber(e.target.value)}
-                placeholder="Deixe em branco para gerar automaticamente"
+                placeholder="Número do fluxo existente"
               />
-              <p className="text-xs text-muted-foreground">
-                Opcional. Se não informado, o próximo número sequencial será gerado automaticamente.
-              </p>
+              <div className="mt-1 flex items-center gap-2">
+                <Checkbox
+                  id="allow-duplicate-flow-numbers"
+                  checked={allowDuplicateFlowNumbers}
+                  onCheckedChange={(checked) => setAllowDuplicateFlowNumbers(checked === true)}
+                />
+                <Label htmlFor="allow-duplicate-flow-numbers" className="font-normal">
+                  Permitir repetir números deste fluxo
+                </Label>
+              </div>
+              {allowDuplicateFlowNumbers && (
+                <p className="text-xs text-amber-700 dark:text-amber-400">
+                  Atenção: esta opção permite reutilizar números já existentes somente neste fluxo.
+                </p>
+              )}
             </div>
           )}
           {generalFields.map((field) => (

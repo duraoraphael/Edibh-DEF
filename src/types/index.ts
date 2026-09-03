@@ -48,6 +48,9 @@ export interface AttachmentRef {
 export interface AppRecord {
   id: string;
   recordNumber?: string;
+  /** Internal proof that the first number was allocated by the atomic yearly counter. */
+  sequenceCounterId?: string;
+  sequenceValue?: number;
   description?: string;
   category?: string;
   status: RecordStatus;

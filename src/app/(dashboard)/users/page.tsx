@@ -1,9 +1,12 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 import { doc, onSnapshot, Timestamp, updateDoc } from "firebase/firestore";
 import { toast } from "sonner";
 import { Search } from "lucide-react";
+import { BatchNumberCorrection } from "@/components/admin/batch-number-correction";
 import { usersCol, writeAuditLog } from "@/lib/firestore-helpers";
 import { db } from "@/lib/firebase";
 import { useAuth } from "@/lib/auth-context";
@@ -56,6 +59,8 @@ function formatLastActive(value: User["lastActive"]): string {
 }
 
 export default function UsersPage() {
+  const searchParams = useSearchParams();
+  const activeTab = searchParams.get("tab") === "numeracao" ? "numeracao" : "usuarios";
   const { profile } = useAuth();
   const isAdmin = profile?.role === "admin";
   const [users, setUsers] = useState<User[]>([]);
@@ -147,6 +152,30 @@ export default function UsersPage() {
     }
   }
 
+  const tabs = (
+    <div className="flex gap-2 border-b border-border/80">
+      <Link href="/users" className={`px-4 py-2 text-sm font-medium ${activeTab === "usuarios" ? "border-b-2 border-primary text-primary" : "text-muted-foreground hover:text-foreground"}`}>
+        Usuários
+      </Link>
+      <Link href="/users?tab=numeracao" className={`px-4 py-2 text-sm font-medium ${activeTab === "numeracao" ? "border-b-2 border-primary text-primary" : "text-muted-foreground hover:text-foreground"}`}>
+        Correção de numeração
+      </Link>
+    </div>
+  );
+
+  if (activeTab === "numeracao") {
+    return (
+      <div className="flex flex-col gap-6">
+        <div>
+          <h1 className="text-2xl font-semibold tracking-tight">Administração</h1>
+          <p className="text-sm text-muted-foreground">Corrija a numeração de vários fluxos em uma única operação.</p>
+        </div>
+        {tabs}
+        <BatchNumberCorrection />
+      </div>
+    );
+  }
+
   return (
     <div className="flex flex-col gap-6">
       <div>
@@ -163,6 +192,8 @@ export default function UsersPage() {
           )}
         </p>
       </div>
+
+      {tabs}
 
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
         <div className="relative flex-1">

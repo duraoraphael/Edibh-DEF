@@ -17,3 +17,18 @@ export function compareRecordNumbers(a?: string, b?: string): number {
   if (left.valid !== right.valid) return left.valid ? -1 : 1;
   return left.raw.localeCompare(right.raw, "pt-BR", { numeric: true, sensitivity: "base" });
 }
+
+/** Editing the record itself is never a conflict; a different occupied number needs explicit consent. */
+export function canUseEditedRecordNumber({
+  current,
+  next,
+  duplicateExists,
+  allowDuplicate,
+}: {
+  current?: string;
+  next: string;
+  duplicateExists: boolean;
+  allowDuplicate: boolean;
+}): boolean {
+  return next === current || !duplicateExists || allowDuplicate;
+}

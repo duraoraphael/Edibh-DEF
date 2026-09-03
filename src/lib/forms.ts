@@ -320,8 +320,13 @@ export async function createRecordWithSequentialNumber(
     const current = snap.exists() ? (snap.data().value as number) : 0;
     const next = current + 1;
     const recordNumber = formatRecordNumber(next, year);
-    tx.set(counterRef, { value: next, year }, { merge: true });
-    tx.set(recordRef, sanitizeForFirestore(buildRecordPayload(recordNumber)), { merge: true });
+    const sequenceCounterId = recordCounterId(year);
+    tx.set(counterRef, { value: next, year, lastRecordId: draftId, lastRecordNumber: recordNumber }, { merge: true });
+    tx.set(recordRef, sanitizeForFirestore({
+      ...buildRecordPayload(recordNumber),
+      sequenceCounterId,
+      sequenceValue: next,
+    }), { merge: true });
     tx.set(approvalRef, sanitizeForFirestore(buildApprovalPayload(recordNumber)));
     return recordNumber;
   });

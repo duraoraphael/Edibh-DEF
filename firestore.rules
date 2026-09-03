@@ -72,6 +72,22 @@
           || (resource.data.status == 'reajuste' && request.resource.data.status == 'pendente');
       }
 
+      function expectedRecordNumber(value, year) {
+        return (value < 10 ? '00' : (value < 100 ? '0' : ''))
+          + string(value) + '/' + string(year);
+      }
+
+      function hasValidInitialSequence(recordId) {
+        let counterId = request.resource.data.sequenceCounterId;
+        let counter = getAfter(/databases/$(database)/documents/settings/$(counterId));
+        return request.resource.data.sequenceCounterId.matches('recordCounter_[0-9]{4}')
+          && request.resource.data.sequenceValue is int
+          && counter.data.value == request.resource.data.sequenceValue
+          && counter.data.lastRecordId == recordId
+          && counter.data.lastRecordNumber == request.resource.data.recordNumber
+          && request.resource.data.recordNumber == expectedRecordNumber(counter.data.value, counter.data.year);
+      }
+
       // users: self may always read their own profile (so a pending account
       // can see its own status); reading anyone else's profile — including a
       // `list` of the collection — requires approval. Only admin may change
@@ -106,12 +122,21 @@
         allow read: if isApprovedUser();
         allow create: if isActiveNonViewer()
           && request.resource.data.authorId == request.auth.uid
-          && request.resource.data.status in ['rascunho', 'pendente']
+          && (request.resource.data.status in ['rascunho', 'pendente']
+            || (isAdmin() && request.resource.data.importBatchId is string))
           && request.resource.data.keys().hasOnly([
             'recordNumber', 'description', 'category', 'status', 'authorId', 'authorName',
-            'attachments', 'formId', 'data', 'createdAt', 'updatedAt', 'importBatchId', 'isCase'
-          ]);
-        allow update: if isAdminOrGerente()
+            'attachments', 'formId', 'data', 'createdAt', 'updatedAt', 'importBatchId', 'isCase',
+            'sequenceCounterId', 'sequenceValue'
+          ])
+          && ((!request.resource.data.keys().hasAny(['recordNumber'])
+              && request.resource.data.status == 'rascunho')
+            || (request.resource.data.status == 'pendente' && hasValidInitialSequence(recordId))
+            || (isAdmin()
+              && request.resource.data.importBatchId is string
+              && request.resource.data.recordNumber is string
+              && request.resource.data.recordNumber.matches('[0-9]+/[0-9]{4}')));
+        allow update: if (isAdminOrGerente()
           || (isTecnico()
             && resource.data.authorId == request.auth.uid
             && request.resource.data.authorId == resource.data.authorId
@@ -128,7 +153,10 @@
             && resource.data.authorId == request.auth.uid
             && request.resource.data.authorId == resource.data.authorId
             && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['isCase', 'updatedAt'])
-            && request.resource.data.isCase is bool);
+            && request.resource.data.isCase is bool))
+          && (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['recordNumber'])
+            || resource.data.keys().hasAny(['recordNumber'])
+            || hasValidInitialSequence(recordId));
         allow delete: if isAdmin();
 
         match /updates/{updateId} {
@@ -232,16 +260,22 @@
       // number); every other setting stays admin/gerente-only.
       match /settings/{settingId} {
         allow read: if isApprovedUser();
-        allow create: if isAdminOrGerente()
-          || (settingId.matches('recordCounter(_[0-9]{4})?') && isActiveNonViewer()
+        allow create: if (settingId.matches('recordCounter(_[0-9]{4})?') && isActiveNonViewer()
             && request.resource.data.keys().hasOnly(['value', 'year'])
-            && request.resource.data.value is int && request.resource.data.value >= 0);
-        allow update: if isAdminOrGerente()
-          || (settingId.matches('recordCounter(_[0-9]{4})?') && isActiveNonViewer()
+            && request.resource.data.value is int && request.resource.data.value >= 0)
+          || (!settingId.matches('recordCounter(_[0-9]{4})?') && isAdminOrGerente());
+        allow update: if (settingId.matches('recordCounter(_[0-9]{4})?') && isActiveNonViewer()
+            && request.resource.data.diff(resource.data).affectedKeys()
+              .hasOnly(['value', 'lastRecordId', 'lastRecordNumber'])
+            && request.resource.data.value is int
+            && request.resource.data.value == resource.data.value + 1
+            && request.resource.data.lastRecordId is string
+            && request.resource.data.lastRecordNumber is string)
+          || (settingId.matches('recordCounter(_[0-9]{4})?') && isAdmin()
             && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['value'])
             && request.resource.data.value is int
-            && request.resource.data.value > resource.data.value
-            && request.resource.data.value <= resource.data.value + 1000);
+            && request.resource.data.value > resource.data.value)
+          || (!settingId.matches('recordCounter(_[0-9]{4})?') && isAdminOrGerente());
         allow delete: if isAdminOrGerente();
       }
     }
