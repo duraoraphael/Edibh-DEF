@@ -96,16 +96,21 @@
         allow read: if isSignedIn() && (request.auth.uid == userId || isApprovedUser());
         allow create: if isSignedIn() && request.auth.uid == userId
           && request.resource.data.keys().hasOnly([
-            'name', 'email', 'role', 'status', 'avatarUrl', 'department', 'lastActive', 'createdAt'
+            'uid', 'approved', 'name', 'email', 'role', 'status', 'avatarUrl', 'department', 'lastActive', 'createdAt'
           ])
           && request.resource.data.role == 'visualizador'
           && request.resource.data.status == 'pendente'
+          && request.resource.data.get('uid', userId) == userId
+          && request.resource.data.get('approved', false) == false
+          && (!request.resource.data.keys().hasAny(['uid']) || request.resource.data.createdAt == request.time)
           && request.resource.data.email == request.auth.token.email;
         allow update: if (isAdmin()
             && request.resource.data.keys().hasOnly([
-              'name', 'email', 'role', 'avatarUrl', 'department', 'status', 'lastActive', 'lastLogin', 'createdAt'
+              'uid', 'approved', 'name', 'email', 'role', 'avatarUrl', 'department', 'status', 'lastActive', 'lastLogin', 'createdAt'
             ])
             && request.resource.data.role in ['admin', 'gerente', 'tecnico', 'visualizador']
+            && request.resource.data.get('uid', userId) == resource.data.get('uid', userId)
+            && request.resource.data.get('approved', request.resource.data.status == 'ativo') == (request.resource.data.status == 'ativo')
             && request.resource.data.status in ['pendente', 'ativo', 'inativo', 'rejeitado'])
           || (isSignedIn() && request.auth.uid == userId
               && request.resource.data.diff(resource.data).affectedKeys()

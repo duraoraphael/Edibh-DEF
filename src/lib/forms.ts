@@ -1,8 +1,9 @@
 import { doc, getDoc, getDocs, query, runTransaction, setDoc, where, writeBatch } from "firebase/firestore";
-import { db } from "./firebase";
-import { recordsCol } from "./firestore-helpers";
+import { db } from "@/lib/firebase";
+import { recordsCol, buildAuditLogData, logsCol, type AuditActor } from "@/lib/firestore-helpers";
+import { CONNECTION_MESSAGE } from "@/lib/upload-policy";
 import type { AppRecord, FormField, FormFieldType, RecordStatus, UserRole } from "@/types";
-export { compareRecordNumbers } from "./record-number";
+export { compareRecordNumbers } from "@/lib/record-number";
 
 export const statusLabels: Record<RecordStatus, string> = {
   rascunho: "Rascunho",
@@ -89,7 +90,20 @@ export function logFirestoreError(context: LogErrorContext, error: unknown) {
 export function getFirebaseErrorMessage(error: unknown, fallback: string): string {
   const err = error as { code?: unknown; message?: unknown } | null;
   const code = typeof err?.code === "string" ? err.code : "";
+  const response = (error as { customData?: { serverResponse?: string } })?.customData?.serverResponse || "";
+  if (/\b402\b|billing|payment required/i.test(response)) {
+    return "O Firebase Storage recusou o envio por uma restrição de faturamento (HTTP 402). O administrador deve verificar o plano Blaze e a conta de faturamento do projeto.";
+  }
+  if (["unavailable", "firestore/unavailable", "app/deadline-exceeded", "deadline-exceeded", "auth/network-request-failed", "storage/retry-limit-exceeded"].includes(code)) return CONNECTION_MESSAGE;
   const knownMessages: Record<string, string> = {
+    "auth/user-token-expired": "Sua sessão expirou. Faça login novamente.",
+    "auth/invalid-user-token": "Sua sessão expirou. Faça login novamente.",
+    "auth/user-disabled": "Sua sessão não está disponível. Faça login novamente ou contate o administrador.",
+    "storage/unauthorized": "Você não tem permissão para acessar este arquivo. Verifique a aprovação da conta e as regras do Storage.",
+    "storage/unauthenticated": "Sua sessão expirou. Faça login novamente.",
+    "storage/quota-exceeded": "O Storage excedeu a cota ou está com restrição de faturamento. O administrador deve verificar o plano e o uso do projeto.",
+    "storage/bucket-not-found": "O bucket configurado não foi encontrado. Avise o administrador.",
+    "storage/canceled": "Envio interrompido. Selecione o arquivo para tentar novamente.",
     "permission-denied": "Você não tem permissão para concluir esta operação.",
     "firestore/permission-denied": "Você não tem permissão para concluir esta operação.",
     unauthenticated: "Sua sessão expirou. Faça login novamente.",
@@ -134,15 +148,16 @@ export const roleLabels: Record<UserRole, string> = {
 export const allowedRoutesByRole: Record<UserRole, string[] | null> = {
   admin: null,
   gerente: ["/dashboard", "/cases", "/records", "/records/new", "/forms", "/approvals", "/profile", "/email", "/sharepoint", "/audit"],
-  visualizador: ["/dashboard", "/cases", "/records", "/profile", "/audit"],
+  visualizador: ["/dashboard", "/records"],
   tecnico: ["/dashboard", "/cases", "/records", "/records/new", "/profile", "/audit"],
 };
 
 export function isRouteAllowed(role: UserRole | undefined, pathname: string): boolean {
   if (!role) return false;
   const allowed = allowedRoutesByRole[role];
-  if (!allowed) return true;
-  return allowed.some((r) => pathname === r || pathname.startsWith(r + "/"));
+  if (allowed === null) return true;
+  if (!allowed) return false;
+  return allowed.includes(pathname);
 }
 
 export function slugifyKey(label: string): string {
@@ -308,7 +323,8 @@ export async function reserveSequentialNumbers(count: number): Promise<string[]>
 export async function createRecordWithSequentialNumber(
   draftId: string,
   buildRecordPayload: (recordNumber: string) => Record<string, unknown>,
-  buildApprovalPayload: (recordNumber: string) => Record<string, unknown>
+  buildApprovalPayload: (recordNumber: string) => Record<string, unknown>,
+  actor: AuditActor
 ): Promise<string> {
   const year = new Date().getFullYear();
   await ensureCounterSeeded(year);
@@ -317,6 +333,11 @@ export async function createRecordWithSequentialNumber(
   const approvalRef = doc(db, "approvals", draftId);
   return runTransaction(db, async (tx) => {
     const snap = await tx.get(counterRef);
+    const existingRecord = await tx.get(recordRef);
+    // Retrying an ambiguous commit (including after reload) must not allocate
+    // another number or create another approval for the same draft.
+    const assigned = existingRecord.data()?.recordNumber;
+    if (typeof assigned === "string" && assigned) return assigned;
     const current = snap.exists() ? (snap.data().value as number) : 0;
     const next = current + 1;
     const recordNumber = formatRecordNumber(next, year);
@@ -328,6 +349,9 @@ export async function createRecordWithSequentialNumber(
       sequenceValue: next,
     }), { merge: true });
     tx.set(approvalRef, sanitizeForFirestore(buildApprovalPayload(recordNumber)));
+    tx.set(doc(logsCol()), buildAuditLogData(actor, {
+      action: "Criado", recordId: draftId, recordNumber, statusAfter: "pendente",
+    }));
     return recordNumber;
   });
 }
@@ -343,13 +367,33 @@ export async function saveRecordWithFixedNumber(
   draftId: string,
   recordNumber: string,
   buildRecordPayload: (recordNumber: string) => Record<string, unknown>,
-  buildApprovalPayload: (recordNumber: string) => Record<string, unknown>
+  buildApprovalPayload: (recordNumber: string) => Record<string, unknown>,
+  actor: AuditActor
 ): Promise<void> {
   const recordRef = doc(db, "records", draftId);
   const approvalRef = doc(db, "approvals", draftId);
   await runTransaction(db, async (tx) => {
-    tx.set(recordRef, sanitizeForFirestore(buildRecordPayload(recordNumber)), { merge: true });
-    tx.set(approvalRef, sanitizeForFirestore(buildApprovalPayload(recordNumber)));
+    const current = await tx.get(recordRef);
+    const approval = await tx.get(approvalRef);
+    if (!current.exists()) throw new Error("Registro não encontrado. Recarregue a página.");
+    const before = current.data().status;
+    const resubmitting = before === "reajuste" || before === "rascunho";
+    const status = resubmitting ? "pendente" : before;
+    tx.set(recordRef, sanitizeForFirestore({ ...buildRecordPayload(recordNumber), status,
+      authorId: current.data().authorId, authorName: current.data().authorName,
+      createdAt: current.data().createdAt,
+    }), { merge: true });
+    // Editing an already-pending flow is not a new approval request. Rewriting
+    // approvals here is forbidden for technicians and erased reviewer history.
+    if (resubmitting || !approval.exists()) {
+      tx.set(approvalRef, sanitizeForFirestore(buildApprovalPayload(recordNumber)));
+    } else if (approval.data().recordNumber !== recordNumber) {
+      tx.update(approvalRef, { recordNumber });
+    }
+    tx.set(doc(logsCol()), buildAuditLogData(actor, {
+      action: resubmitting ? "Reenviado após reajuste" : "Editado", recordId: draftId,
+      recordNumber, statusBefore: before, statusAfter: status,
+    }));
   });
 }
 

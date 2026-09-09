@@ -6,9 +6,9 @@ import {
   initializeTestEnvironment,
   type RulesTestEnvironment,
 } from "@firebase/rules-unit-testing";
-import { collection, doc, getDoc, getDocs, setDoc, updateDoc, writeBatch } from "firebase/firestore";
+import { collection, doc, getDoc, getDocs, setDoc, updateDoc, writeBatch, serverTimestamp } from "firebase/firestore";
 
-const PROJECT_ID = "edibh-def-rules-test";
+const PROJECT_ID = process.env.GCLOUD_PROJECT || "edibh-def-rules-test";
 
 let testEnv: RulesTestEnvironment;
 
@@ -81,6 +81,18 @@ beforeEach(async () => {
 function ctx(uid: string | null, claims?: Record<string, unknown>) {
   return uid ? testEnv.authenticatedContext(uid, claims).firestore() : testEnv.unauthenticatedContext().firestore();
 }
+
+test("new profile contract validates UID, approval and timestamp; admin alone may approve", async () => {
+  const uid = "new-profile-contract";
+  const db = ctx(uid, { email: "new@example.invalid" });
+  const profile = { uid, name: "New User", email: "new@example.invalid", role: "visualizador", status: "pendente", approved: false, createdAt: serverTimestamp() };
+  for (const extra of [{ uid: "forged" }, { approved: true }, { createdAt: "forged" }]) await assertFails(setDoc(doc(db, "users", uid), { ...profile, ...extra }));
+  await assertSucceeds(setDoc(doc(db, "users", uid), profile));
+  await assertFails(updateDoc(doc(db, "users", uid), { status: "ativo", approved: true }));
+  await assertFails(updateDoc(doc(ctx("admin-uid"), "users", uid), { status: "ativo" }));
+  await assertSucceeds(updateDoc(doc(ctx("admin-uid"), "users", uid), { status: "ativo", approved: true }));
+  await assertFails(updateDoc(doc(ctx("admin-uid"), "users", uid), { uid: "forged" }));
+});
 
 // ---------- F1: approval gate ----------
 

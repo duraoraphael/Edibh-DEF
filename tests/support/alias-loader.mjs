@@ -6,6 +6,7 @@
 // import style — throws ERR_MODULE_NOT_FOUND the moment a test imports it
 // directly, even though `next build`/`next dev` resolve it fine.
 export async function resolve(specifier, context, nextResolve) {
+  if (specifier === "next/server") return nextResolve("next/server.js", context);
   if (specifier.startsWith("@/")) {
     const rel = specifier.slice(2);
     const hasExtension = /\.[a-zA-Z0-9]+$/.test(rel);

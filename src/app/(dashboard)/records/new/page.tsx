@@ -2,11 +2,12 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { doc, getDoc, onSnapshot, setDoc } from "firebase/firestore";
-import { getDownloadURL, ref, uploadBytesResumable } from "firebase/storage";
+import { doc, getDoc, getDocFromServer, onSnapshot, runTransaction } from "firebase/firestore";
+import { uploadAttachment, deleteOwnedAttachment } from "@/lib/attachment-upload";
+import { ATTACHMENT_ACCEPT, CONNECTION_MESSAGE, withDeadline, isDefiniteWriteFailure, ownedAttachmentPathFromUrl } from "@/lib/upload-policy";
 import { toast } from "sonner";
 import { ChevronsUpDown, Loader2, Paperclip, Search, UploadCloud, X } from "lucide-react";
-import { db, storage } from "@/lib/firebase";
+import { auth, db, firebaseConfig } from "@/lib/firebase";
 import { useAuth } from "@/lib/auth-context";
 import {
   DEFAULT_FORM_ID,
@@ -18,7 +19,8 @@ import {
   saveRecordWithFixedNumber,
   sanitizeForFirestore,
 } from "@/lib/forms";
-import { createNotifications, getUserIdsByRoles, writeAuditLog } from "@/lib/firestore-helpers";
+import { canSubmitRecord } from "@/lib/access-policy";
+import { createNotifications, getUserIdsByRoles } from "@/lib/firestore-helpers";
 import { isAllowedAttachmentUrl } from "@/lib/security/url";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -126,6 +128,7 @@ export default function NewRecordPage() {
   // currently editing (admin/gerente included).
   const [existingAuthorId, setExistingAuthorId] = useState<string | null>(null);
   const [existingAuthorName, setExistingAuthorName] = useState<string | null>(null);
+  const [recordLoaded, setRecordLoaded] = useState(false);
   const [manualRecordNumber, setManualRecordNumber] = useState("");
   const [allowDuplicateFlowNumbers, setAllowDuplicateFlowNumbers] = useState(false);
   const isAdmin = profile?.role === "admin";
@@ -137,13 +140,23 @@ export default function NewRecordPage() {
   const [savingDraft, setSavingDraft] = useState(false);
   const [savedAt, setSavedAt] = useState<Date | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const submitLock = useRef(false);
+  const uploadLock = useRef(false);
+  const draftOperation = useRef<Promise<void>>(Promise.resolve());
+  const latest = useRef({ values, attachments });
+  useEffect(() => { latest.current = { values, attachments }; }, [values, attachments]);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
+    const timer = setTimeout(() => {
+      setFormsLoading(false);
+      toast.error(CONNECTION_MESSAGE);
+    }, 30_000);
     const unsub = onSnapshot(
       doc(db, "formFields", DEFAULT_FORM_ID),
       (snap) => {
+        clearTimeout(timer);
         const form = snap.exists() ? (snap.data() as FormDefinition) : null;
         setActiveForm(form);
         setFormsLoading(false);
@@ -161,11 +174,12 @@ export default function NewRecordPage() {
         }
       },
       (error) => {
+        clearTimeout(timer);
         logFirestoreError({ fn: "NewRecordPage:loadForm" }, error);
         setFormsLoading(false);
       }
     );
-    return () => unsub();
+    return () => { clearTimeout(timer); unsub(); if (debounceRef.current) clearTimeout(debounceRef.current); };
   }, []);
 
   useEffect(() => {
@@ -174,7 +188,8 @@ export default function NewRecordPage() {
     // draft (editId unset but the doc already has an authorId). Field/attachment
     // values are only restored from Firestore when explicitly editing (?id=),
     // otherwise the locally-saved draft state (set at useState init) wins.
-    getDoc(doc(db, "records", draftId)).then((snap) => {
+    withDeadline(getDoc(doc(db, "records", draftId))).then((snap) => {
+      setRecordLoaded(true);
       if (!snap.exists()) return;
       const data = snap.data() as AppRecord;
       if (editId) {
@@ -187,7 +202,7 @@ export default function NewRecordPage() {
       setExistingAuthorId(data.authorId ?? null);
       setExistingAuthorName(data.authorName ?? null);
       setManualRecordNumber(data.recordNumber || "");
-    });
+    }).catch(error => toast.error(getFirebaseErrorMessage(error, "Não foi possível carregar o registro.")));
   }, [draftId, editId]);
 
   const persistDraft = useCallback(
@@ -196,7 +211,7 @@ export default function NewRecordPage() {
         `edibh_draft_${draftId}`,
         JSON.stringify({ values: nextValues, attachments: atts })
       );
-      if (!user) return;
+      if (!user) throw new Error("Faça login novamente.");
       setSavingDraft(true);
       // When editing an already-submitted record, keep its current status and
       // original createdAt so an autosave never turns it back into a rascunho
@@ -213,10 +228,27 @@ export default function NewRecordPage() {
         createdAt: existingCreatedAt ?? new Date().toISOString(),
       });
       try {
-        await setDoc(doc(db, "records", draftId), payload, { merge: true });
+        const operation = draftOperation.current.catch(() => {}).then(() => runTransaction(db, async tx => {
+          const recordRef = doc(db, "records", draftId);
+          const current = await tx.get(recordRef);
+          // Never let a delayed autosave undo a submission or change ownership.
+          const stored = current.data();
+          if (stored?.recordNumber && !editId) {
+            throw Object.assign(new Error("Este registro já foi enviado. Abra-o pelo modo de edição."), { code: "app/already-submitted" });
+          }
+          tx.set(recordRef, { ...payload,
+            status: stored?.status ?? payload.status,
+            authorId: stored?.authorId ?? payload.authorId,
+            authorName: stored?.authorName ?? payload.authorName,
+            createdAt: stored?.createdAt ?? payload.createdAt,
+          }, { merge: true });
+        }));
+        draftOperation.current = operation;
+        await withDeadline(operation);
         setSavedAt(new Date());
       } catch (error) {
         logFirestoreError({ fn: "persistDraft", payload }, error);
+        throw error;
       } finally {
         setSavingDraft(false);
       }
@@ -225,12 +257,14 @@ export default function NewRecordPage() {
   );
 
   function updateValue(field: FormField, raw: unknown) {
+    if (!recordLoaded || submitLock.current || uploadLock.current) return;
     let value = raw;
     if (typeof raw === "string" && field.mask) value = applyMask(raw, field.mask);
     const next = { ...values, [field.key]: value };
     for (const f of activeForm?.fields || []) {
       if (f.dependsOnFieldId === field.id) next[f.key] = defaultValueFor(f);
     }
+    latest.current = { values: next, attachments };
     setValues(next);
     if (debounceRef.current) clearTimeout(debounceRef.current);
     if (isParameterField(field)) {
@@ -239,100 +273,172 @@ export default function NewRecordPage() {
         JSON.stringify({ values: next, attachments })
       );
     }
-    debounceRef.current = setTimeout(() => persistDraft(next, attachments), 800);
+    debounceRef.current = setTimeout(() => { void persistDraft(next, attachments).catch(error => toast.error(getFirebaseErrorMessage(error, "Rascunho preservado neste navegador; não foi sincronizado."))); }, 800);
   }
 
-  async function handleFieldFile(field: FormField, file: File | null) {
-    if (!file || !user) return;
-    // Use a random id instead of Date.now() to keep this function pure for
-    // React's compiler-purity checks and avoid any (unlikely) path collision.
-    const path = `attachments/${user.uid}/${draftId}/${field.key}_${crypto.randomUUID()}_${file.name}`;
-    const storageRef = ref(storage, path);
-    const task = uploadBytesResumable(storageRef, file);
-    task.on(
-      "state_changed",
-      (snap) => {
-        const pct = Math.round((snap.bytesTransferred / snap.totalBytes) * 100);
-        setUploadProgress((p) => ({ ...p, [field.key]: pct }));
-      },
-      () => toast.error(`Falha ao enviar ${file.name}`),
-      async () => {
-        const url = await getDownloadURL(storageRef);
-        updateValue(field, url);
-        setUploadProgress((p) => {
-          const rest = { ...p };
-          delete rest[field.key];
-          return rest;
-        });
-      }
-    );
+  function canUpload() {
+    if (!recordLoaded || submitLock.current || uploadLock.current) return false;
+    if (!user || !canSubmitRecord(profile)) {
+      toast.error("Faça login com uma conta ativa autorizada a criar registros.");
+      return false;
+    }
+    return true;
   }
 
-  async function handleFiles(files: FileList | null) {
-    if (!files || !user) return;
-    const list = Array.from(files);
-    for (const file of list) {
-      // A per-upload id (not the filename) tracks progress and identifies the
-      // resulting attachment — two files can share a name (e.g. "IMG_001.jpg"
-      // from a phone camera), which previously caused duplicate React keys
-      // and made removing one attachment remove every same-named one.
-      const id = crypto.randomUUID();
-      const path = `attachments/${user.uid}/${draftId}/${id}_${file.name}`;
-      const storageRef = ref(storage, path);
-      const task = uploadBytesResumable(storageRef, file);
-      setUploadFileNames((p) => ({ ...p, [id]: file.name }));
-      task.on(
-        "state_changed",
-        (snap) => {
-          const pct = Math.round((snap.bytesTransferred / snap.totalBytes) * 100);
-          setUploadProgress((p) => ({ ...p, [id]: pct }));
-        },
-        () => {
-          toast.error(`Falha ao enviar ${file.name}`);
-          setUploadProgress((p) => {
-            const rest = { ...p };
-            delete rest[id];
-            return rest;
-          });
-          setUploadFileNames((p) => {
-            const rest = { ...p };
-            delete rest[id];
-            return rest;
-          });
-        },
-        async () => {
-          const url = await getDownloadURL(storageRef);
-          setAttachments((prev) => {
-            const next = [...prev, { id, name: file.name, url, size: file.size, contentType: file.type }];
-            persistDraft(values, next);
-            return next;
-          });
-          setUploadProgress((p) => {
-            const rest = { ...p };
-            delete rest[id];
-            return rest;
-          });
-          setUploadFileNames((p) => {
-            const rest = { ...p };
-            delete rest[id];
-            return rest;
-          });
+  async function sendFile(file: File, field?: FormField) {
+    if (!user) return;
+    const id = crypto.randomUUID();
+    const progressKey = field?.key ?? id;
+    setUploadProgress(p => ({ ...p, [progressKey]: 0 }));
+    setUploadFileNames(p => ({ ...p, [progressKey]: file.name }));
+    const before = latest.current;
+    let uploaded: Awaited<ReturnType<typeof uploadAttachment>> | undefined;
+    try {
+      uploaded = await uploadAttachment(file, user.uid, draftId, id, pct =>
+        setUploadProgress(p => ({ ...p, [progressKey]: pct })));
+      const next = field
+        ? { values: { ...before.values, [field.key]: uploaded.attachment.url }, attachments: before.attachments }
+        : { values: before.values, attachments: [...before.attachments, uploaded.attachment] };
+      // Local recovery is written by persistDraft before the Firestore request.
+      latest.current = next;
+      setValues(next.values);
+      setAttachments(next.attachments);
+      await persistDraft(next.values, next.attachments);
+      localStorage.removeItem(uploaded.recoveryKey);
+      if (field) {
+        // Replacing a field must not leak the old object. Only the uploader's
+        // bucket/path is eligible, and only after its reference was committed.
+        const oldPath = ownedAttachmentPathFromUrl(before.values[field.key], firebaseConfig.storageBucket, user.uid);
+        const remaining = JSON.stringify(next);
+        if (oldPath && !remaining.includes(encodeURIComponent(oldPath)) && !remaining.includes(oldPath)) {
+          const cleanupKey = `edibh_upload_${user.uid}_${crypto.randomUUID()}`;
+          localStorage.setItem(cleanupKey, JSON.stringify({ path: oldPath, recordId: draftId }));
+          try { await deleteOwnedAttachment(oldPath, user.uid); localStorage.removeItem(cleanupKey); }
+          catch { toast.error("Arquivo substituído. A limpeza da versão anterior ficou pendente para recuperação."); }
         }
-      );
+      }
+    } catch (error) {
+      if (uploaded && isDefiniteWriteFailure(error)) {
+        latest.current = before;
+        setValues(before.values);
+        setAttachments(before.attachments);
+        localStorage.setItem(`edibh_draft_${draftId}`, JSON.stringify(before));
+        try {
+          await deleteOwnedAttachment(uploaded.attachment.path, user.uid);
+          localStorage.removeItem(uploaded.recoveryKey);
+        } catch { toast.error("A limpeza do arquivo ficou pendente. Use Recuperar arquivos pendentes após restabelecer a conexão."); }
+      }
+      toast.error(getFirebaseErrorMessage(error, "Não foi possível enviar o arquivo."));
+    } finally {
+      setUploadProgress(p => { const next = { ...p }; delete next[progressKey]; return next; });
+      setUploadFileNames(p => { const next = { ...p }; delete next[progressKey]; return next; });
     }
   }
 
-  function removeAttachment(id: string) {
-    setAttachments((prev) => {
-      const next = prev.filter((a) => a.id !== id);
-      persistDraft(values, next);
-      return next;
-    });
+  async function handleFieldFile(field: FormField, file: File | null) {
+    if (!file || !canUpload()) return;
+    uploadLock.current = true;
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    try { await withDeadline(draftOperation.current); await sendFile(file, field); }
+    catch (error) { toast.error(getFirebaseErrorMessage(error, "Não foi possível enviar o arquivo.")); }
+    finally { uploadLock.current = false; }
+  }
+
+  async function handleFiles(files: FileList | null) {
+    if (!files || !canUpload()) return;
+    uploadLock.current = true;
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    try {
+      await withDeadline(draftOperation.current);
+      for (const file of Array.from(files)) await sendFile(file);
+    } catch (error) { toast.error(getFirebaseErrorMessage(error, "Não foi possível enviar os arquivos.")); }
+    finally { uploadLock.current = false; if (fileInputRef.current) fileInputRef.current.value = ""; }
+  }
+
+  async function removeAttachment(id: string) {
+    if (!user || !canUpload()) return;
+    uploadLock.current = true;
+    const before = latest.current;
+    const attachment = before.attachments.find(a => a.id === id);
+    const next = before.attachments.filter(a => a.id !== id);
+    try {
+      if (debounceRef.current) clearTimeout(debounceRef.current);
+      await persistDraft(before.values, next);
+      latest.current = { values: before.values, attachments: next };
+      setAttachments(next);
+      const path = attachment?.path || ownedAttachmentPathFromUrl(attachment?.url, firebaseConfig.storageBucket, user.uid);
+      const remaining = JSON.stringify(latest.current);
+      if (path?.startsWith(`attachments/${user.uid}/`) && !remaining.includes(path) && !remaining.includes(encodeURIComponent(path))) {
+        const key = `edibh_upload_${user.uid}_${id}`;
+        localStorage.setItem(key, JSON.stringify({ path, recordId: draftId, id, name: attachment?.name }));
+        await deleteOwnedAttachment(path, user.uid);
+        localStorage.removeItem(key);
+      }
+    } catch (error) { toast.error(getFirebaseErrorMessage(error, "Não foi possível excluir o arquivo. A recuperação continua disponível.")); }
+    finally { uploadLock.current = false; }
+  }
+
+  async function recoverUploads() {
+    if (!user || !canUpload()) return;
+    uploadLock.current = true;
+    setSavingDraft(true);
+    try {
+      await withDeadline(draftOperation.current);
+      const prefix = `edibh_upload_${user.uid}_`;
+      const keys = Object.keys(localStorage).filter(key => key.startsWith(prefix));
+      for (const key of keys) {
+        const pending = JSON.parse(localStorage.getItem(key) || "null");
+        if (!pending || pending.recordId !== draftId || typeof pending.path !== "string") continue;
+        const containsPath = (data: unknown) => {
+          const serialized = JSON.stringify(data);
+          return serialized.includes(pending.path) || serialized.includes(encodeURIComponent(pending.path));
+        };
+        // A server read is mandatory: cache absence does not prove an orphan.
+        const current = await withDeadline(getDocFromServer(doc(db, "records", draftId)));
+        if (containsPath(current.data() || {})) {
+          localStorage.removeItem(key);
+        } else if (containsPath(latest.current)) {
+          await persistDraft(latest.current.values, latest.current.attachments);
+          localStorage.removeItem(key);
+        } else {
+          await deleteOwnedAttachment(pending.path, user.uid);
+          localStorage.removeItem(key);
+        }
+      }
+      toast.success("Arquivos pendentes deste rascunho reconciliados.");
+    } catch (error) { toast.error(getFirebaseErrorMessage(error, "A recuperação não foi concluída. Tente novamente após restabelecer a conexão.")); }
+    finally { uploadLock.current = false; setSavingDraft(false); }
+  }
+
+  async function removeFieldFile(field: FormField) {
+    if (!user || !canUpload()) return;
+    uploadLock.current = true;
+    const before = latest.current;
+    const nextValues = { ...before.values, [field.key]: "" };
+    try {
+      if (debounceRef.current) clearTimeout(debounceRef.current);
+      await persistDraft(nextValues, before.attachments);
+      latest.current = { values: nextValues, attachments: before.attachments };
+      setValues(nextValues);
+      const path = ownedAttachmentPathFromUrl(before.values[field.key], firebaseConfig.storageBucket, user.uid);
+      const remaining = JSON.stringify(latest.current);
+      if (path && !remaining.includes(encodeURIComponent(path)) && !remaining.includes(path)) {
+        const key = `edibh_upload_${user.uid}_${crypto.randomUUID()}`;
+        localStorage.setItem(key, JSON.stringify({ path, recordId: draftId }));
+        await deleteOwnedAttachment(path, user.uid);
+        localStorage.removeItem(key);
+      }
+    } catch (error) { toast.error(getFirebaseErrorMessage(error, "Não foi possível concluir a exclusão. Use a recuperação de arquivos pendentes.")); }
+    finally { uploadLock.current = false; }
   }
 
   function validateForm(): boolean {
+    if (!activeForm) { toast.error("Aguarde o carregamento do formulário antes de enviar."); return false; }
     for (const field of activeForm?.fields || []) {
       const value = values[field.key];
+      if (field.type === "anexo" && value && (typeof value !== "string" || !isAllowedAttachmentUrl(value))) {
+        toast.error(`Selecione novamente o arquivo do campo ${field.label}.`); return false;
+      }
       if (field.required) {
         const empty =
           value === undefined ||
@@ -354,17 +460,39 @@ export default function NewRecordPage() {
         } catch {}
       }
     }
+    if (attachments.some(attachment => !isAllowedAttachmentUrl(attachment.url))) {
+      toast.error("Remova os anexos inválidos e selecione os arquivos novamente."); return false;
+    }
     return true;
   }
 
   async function handleSubmit() {
+    if (!recordLoaded || submitLock.current) return;
+    if (uploadLock.current || Object.keys(uploadProgress).length) {
+      toast.error("Aguarde a conclusão do envio dos arquivos."); return;
+    }
     if (!validateForm()) return;
     if (!user) {
       toast.error("Sessão expirada. Faça login novamente para enviar o registro.");
       return;
     }
+    if (!canSubmitRecord(profile)) {
+      toast.error("Sua conta não está autorizada a enviar registros."); return;
+    }
+    submitLock.current = true;
+    if (debounceRef.current) clearTimeout(debounceRef.current);
     setSubmitting(true);
+    let operation = "session.refresh";
     try {
+      if (auth.currentUser?.uid !== user.uid) throw new Error("Sua sessão mudou. Faça login novamente.");
+      await withDeadline(user.getIdToken(true));
+      operation = "users.checkPermission";
+      const currentProfile = await withDeadline(getDocFromServer(doc(db, "users", user.uid)));
+      const actorProfile = currentProfile.data() as import("@/types").User | undefined;
+      if (!currentProfile.exists() || !canSubmitRecord(actorProfile || null)) throw new Error("Sua conta não está autorizada a enviar registros. Consulte o administrador.");
+      const actor = { uid: user.uid, name: actorProfile!.name, role: actorProfile!.role };
+      operation = "records.waitDraft";
+      await withDeadline(draftOperation.current);
       const typed = manualRecordNumber.trim();
       const authorId = existingAuthorId ?? user.uid;
       const authorName = existingAuthorName ?? profile?.name ?? "Usuário";
@@ -393,7 +521,7 @@ export default function NewRecordPage() {
       // the write is rejected for any reason, the number is never consumed
       // and nothing is left half-created.
       let recordNumber: string;
-      if (editId) {
+      if (editId && existingRecordNumber) {
         const editedRecordNumber = isAdmin ? typed : existingRecordNumber;
         if (!editedRecordNumber) {
           toast.error("Informe o número do fluxo.");
@@ -401,7 +529,7 @@ export default function NewRecordPage() {
           return;
         }
         const duplicateExists = editedRecordNumber !== existingRecordNumber
-          && await recordNumberExists(editedRecordNumber, draftId);
+          && await withDeadline(recordNumberExists(editedRecordNumber, draftId));
         if (!canUseEditedRecordNumber({
           current: existingRecordNumber,
           next: editedRecordNumber,
@@ -413,53 +541,43 @@ export default function NewRecordPage() {
           return;
         }
         recordNumber = editedRecordNumber;
-        await saveRecordWithFixedNumber(draftId, recordNumber, buildRecordPayload, buildApprovalPayload);
+        operation = "records+approvals+logs.updateTransaction";
+        await withDeadline(saveRecordWithFixedNumber(draftId, recordNumber, buildRecordPayload, buildApprovalPayload, actor));
       } else {
         if (existingRecordNumber) {
           toast.error("Este fluxo já possui numeração. Abra-o pelo modo de edição.");
           setSubmitting(false);
           return;
         }
-        recordNumber = await createRecordWithSequentialNumber(draftId, buildRecordPayload, buildApprovalPayload);
+        operation = "settings+records+approvals+logs.createTransaction";
+        recordNumber = await withDeadline(createRecordWithSequentialNumber(draftId, buildRecordPayload, buildApprovalPayload, actor));
       }
 
-      try {
-        await writeAuditLog(
-          { uid: user.uid, name: profile?.name || "Usuário", role: profile?.role },
-          {
-            action: editId ? "Reenviado após reajuste" : "Criado",
-            recordId: draftId,
-            recordNumber,
-            statusBefore: editId ? "reajuste" : "",
-            statusAfter: "pendente",
-          }
-        );
-      } catch (error) {
-        logFirestoreError({ fn: "handleSubmit:writeAuditLog" }, error);
-      }
-
-      try {
-        const approverIds = await getUserIdsByRoles(["admin", "gerente"]);
-        await createNotifications(approverIds, {
+      if (!editId || !existingRecordNumber || existingStatus === "reajuste") try {
+        const approverIds = await withDeadline(getUserIdsByRoles(["admin", "gerente"]), 5000);
+        await withDeadline(createNotifications(approverIds, {
           type: "aprovacao_pendente",
           title: "Aprovação pendente",
           message: `Registro ${recordNumber} aguarda análise`,
           recordId: draftId,
           recordNumber,
           href: "/approvals",
-        });
+        }), 5000);
       } catch (error) {
         logFirestoreError({ fn: "handleSubmit:createNotifications" }, error);
       }
 
       window.localStorage.removeItem(`edibh_draft_${draftId}`);
       window.localStorage.removeItem("edibh_draft_id");
-      toast.success(`Registro ${recordNumber} enviado para aprovação`);
+      toast.success(editId && existingRecordNumber && existingStatus !== "reajuste"
+        ? `Registro ${recordNumber} atualizado`
+        : `Registro ${recordNumber} enviado para aprovação`);
       router.push("/records");
     } catch (error) {
-      logFirestoreError({ fn: "handleSubmit" }, error);
+      logFirestoreError({ fn: `handleSubmit:${operation}` }, error);
       toast.error(getFirebaseErrorMessage(error, "Não foi possível enviar o registro."));
     } finally {
+      submitLock.current = false;
       setSubmitting(false);
     }
   }
@@ -468,6 +586,19 @@ export default function NewRecordPage() {
   const generalFields = fields.filter((f) => f.type !== "textarea" && f.type !== "anexo");
   const textFields = fields.filter((f) => f.type === "textarea");
   const uploadFields = fields.filter((f) => f.type === "anexo");
+
+  if (!recordLoaded) return <Card className="p-6">
+    <p>Carregando o registro. Se a conexão falhou, tente novamente.</p>
+    <Button variant="outline" onClick={() => window.location.reload()}>Recarregar</Button>
+  </Card>;
+
+  if (!editId && existingAuthorId && existingAuthorId !== user?.uid) return <Card className="p-6">
+    <p>Este navegador guardou um rascunho de outra conta. Inicie um novo fluxo para continuar com seu usuário.</p>
+    <Button onClick={() => {
+      localStorage.setItem("edibh_draft_id", crypto.randomUUID());
+      window.location.reload();
+    }}>Iniciar novo fluxo</Button>
+  </Card>;
 
   return (
     <div className="mx-auto flex max-w-3xl flex-col gap-6">
@@ -559,6 +690,9 @@ export default function NewRecordPage() {
 
       <SectionCard number={textFields.length > 0 ? 3 : 2} title="Anexos">
         <div className="flex flex-col gap-6">
+          <Button type="button" variant="outline" onClick={recoverUploads} disabled={submitting || savingDraft || Object.keys(uploadProgress).length > 0}>
+            Recuperar arquivos pendentes
+          </Button>
           {uploadFields.map((field) => (
             <div key={field.id} className="flex flex-col gap-2">
               <div className="flex items-center gap-2">
@@ -567,7 +701,13 @@ export default function NewRecordPage() {
               </div>
               <input
                 type="file"
-                onChange={(e) => handleFieldFile(field, e.target.files?.[0] || null)}
+                accept={ATTACHMENT_ACCEPT}
+                disabled={submitting || Object.keys(uploadProgress).length > 0}
+                onChange={(e) => {
+                  const file = e.currentTarget.files?.[0] || null;
+                  e.currentTarget.value = "";
+                  void handleFieldFile(field, file);
+                }}
                 className="text-sm"
               />
               {uploadProgress[field.key] !== undefined && <Progress value={uploadProgress[field.key]} />}
@@ -583,6 +723,11 @@ export default function NewRecordPage() {
                   Arquivo enviado
                 </a>
               ) : null}
+              {!!values[field.key] && (
+                <Button type="button" variant="outline" onClick={() => removeFieldFile(field)} disabled={submitting || savingDraft}>
+                  Remover arquivo
+                </Button>
+              )}
             </div>
           ))}
 
@@ -609,6 +754,8 @@ export default function NewRecordPage() {
             <input
               ref={fileInputRef}
               type="file"
+              accept={ATTACHMENT_ACCEPT}
+              disabled={submitting || Object.keys(uploadProgress).length > 0}
               multiple
               className="hidden"
               onChange={(e) => handleFiles(e.target.files)}
@@ -630,7 +777,9 @@ export default function NewRecordPage() {
                 <div key={a.id} className="flex items-center justify-between rounded-md border border-border p-3">
                   <div className="flex items-center gap-2 min-w-0">
                     <Paperclip className="h-4 w-4 shrink-0 text-muted-foreground" />
-                    <span className="truncate text-sm">{a.name}</span>
+                    {isAllowedAttachmentUrl(a.url) ? (
+                      <a href={a.url} target="_blank" rel="noreferrer" className="truncate text-sm text-primary underline">{a.name}</a>
+                    ) : <span className="truncate text-sm">{a.name}</span>}
                   </div>
                   <button onClick={() => removeAttachment(a.id)} className="text-muted-foreground hover:text-destructive">
                     <X className="h-4 w-4" />
@@ -646,9 +795,9 @@ export default function NewRecordPage() {
         <p className="text-xs text-muted-foreground">
           {savingDraft ? "Salvando rascunho..." : savedAt ? `Rascunho salvo às ${savedAt.toLocaleTimeString()}` : ""}
         </p>
-        <Button onClick={handleSubmit} disabled={submitting} size="lg">
+        <Button onClick={handleSubmit} disabled={submitting || Object.keys(uploadProgress).length > 0 || savingDraft} size="lg">
           {submitting && <Loader2 className="h-4 w-4 animate-spin" />}
-          Enviar para aprovação
+          {editId && existingRecordNumber && existingStatus !== "reajuste" ? "Salvar alterações" : "Enviar para aprovação"}
         </Button>
       </div>
     </div>

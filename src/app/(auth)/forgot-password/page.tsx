@@ -1,11 +1,12 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { motion } from "framer-motion";
 import { Leaf, Loader2, MailCheck } from "lucide-react";
 import { toast } from "sonner";
+import { authErrorMessage, normalizeEmail } from "@/lib/auth-errors";
 import { useAuth } from "@/lib/auth-context";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -18,6 +19,7 @@ export default function ForgotPasswordPage() {
   const [email, setEmail] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [sent, setSent] = useState(false);
+  const submitLock = useRef(false);
 
   useEffect(() => {
     if (!loading && user) router.replace("/dashboard");
@@ -25,13 +27,16 @@ export default function ForgotPasswordPage() {
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
+    if (submitLock.current) return;
+    submitLock.current = true;
     setSubmitting(true);
     try {
       await resetPassword(email);
       setSent(true);
-    } catch {
-      toast.error("Muitas solicitações. Aguarde e tente novamente.");
+    } catch (error) {
+      toast.error(authErrorMessage((error as { code?: string }).code));
     } finally {
+      submitLock.current = false;
       setSubmitting(false);
     }
   }
@@ -82,7 +87,7 @@ export default function ForgotPasswordPage() {
                     required
                     placeholder="seu.nome@empresa.com"
                     value={email}
-                    onChange={(e) => setEmail(e.target.value)}
+                    onChange={(e) => setEmail(normalizeEmail(e.target.value))}
                   />
                 </div>
                 <Button type="submit" className="mt-2 h-11" disabled={submitting}>

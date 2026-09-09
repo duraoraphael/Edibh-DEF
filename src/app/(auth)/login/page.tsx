@@ -1,51 +1,25 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { motion } from "framer-motion";
 import Image from "next/image";
 import { Loader2 } from "lucide-react";
 import { toast } from "sonner";
+import { authErrorMessage, normalizeEmail } from "@/lib/auth-errors";
 import { useAuth } from "@/lib/auth-context";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card } from "@/components/ui/card";
 
-/**
- * Maps a Firebase Auth error code to a user-facing message. Config-level
- * failures (bad/expired API key, disabled project, etc.) get a message that
- * clearly points at a broken deployment — never lumped in with "wrong
- * password", which would send whoever's debugging chasing the wrong cause.
- * Credential errors stay deliberately generic (never confirm whether an
- * email exists in the system).
- */
-function loginErrorMessage(code: string | undefined): string {
-  switch (code) {
-    case "auth/too-many-requests":
-      return "Muitas tentativas. Aguarde alguns minutos e tente novamente.";
-    case "auth/invalid-api-key":
-    case "auth/api-key-not-valid":
-    case "auth/app-not-authorized":
-    case "auth/project-not-found":
-      return "Erro de configuração do sistema. Contate o administrador (chave/projeto Firebase inválido).";
-    case "auth/network-request-failed":
-      return "Falha de conexão. Verifique sua internet e tente novamente.";
-    case "auth/user-disabled":
-      return "Esta conta foi desativada. Contate o administrador.";
-    case "auth/invalid-email":
-      return "E-mail inválido.";
-    default:
-      return "Credenciais inválidas. Verifique e tente novamente.";
-  }
-}
-
 export default function LoginPage() {
   const { user, loading, signIn } = useAuth();
   const router = useRouter();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const submitLock = useRef(false);
   const [submitting, setSubmitting] = useState(false);
 
   useEffect(() => {
@@ -54,6 +28,8 @@ export default function LoginPage() {
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
+    if (submitLock.current) return;
+    submitLock.current = true;
     setSubmitting(true);
     try {
       await signIn(email, password);
@@ -63,8 +39,9 @@ export default function LoginPage() {
       const code = (error as { code?: string })?.code;
       // Keep logs free of provider messages, which can contain user input.
       console.error("[LoginPage] signIn failed", { code: code || "unknown" });
-      toast.error(loginErrorMessage(code));
+      toast.error(authErrorMessage(code));
     } finally {
+      submitLock.current = false;
       setSubmitting(false);
     }
   }
@@ -106,7 +83,8 @@ export default function LoginPage() {
                 required
                 placeholder="seu.nome@empresa.com"
                 value={email}
-                onChange={(e) => setEmail(e.target.value)}
+                onChange={(e) => setEmail(normalizeEmail(e.target.value))}
+                autoComplete="username"
               />
             </div>
             <div className="flex flex-col gap-1.5">
@@ -122,6 +100,7 @@ export default function LoginPage() {
               <Input
                 id="password"
                 type="password"
+                autoComplete="current-password"
                 required
                 placeholder="••••••••"
                 value={password}

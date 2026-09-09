@@ -1,0 +1,15 @@
+.git
+.next
+node_modules
+.env*
+recovery
+.agents
+.codex
+.claude
+docs
+scripts
+tests
+test-results
+playwright-report
+*.log
+*.tsbuildinfo

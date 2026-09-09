@@ -7,6 +7,9 @@ export interface FirestoreTimestampLike {
 
 export interface User {
   id: string;
+  uid?: string;
+  /** Mirrors status for new profiles; status remains the authorization source. */
+  approved?: boolean;
   name: string;
   email: string;
   role: UserRole;
@@ -37,6 +40,8 @@ export type RecordStatus =
   | "concluido_direto";
 
 export interface AttachmentRef {
+  /** Storage object path; absent on legacy attachments. */
+  path?: string;
   /** Stable unique id, independent of filename (two uploads can share a name, e.g. "IMG_001.jpg"). */
   id: string;
   name: string;

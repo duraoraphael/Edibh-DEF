@@ -5,13 +5,13 @@ import {
   getDocs,
   query,
   where,
-  QueryDocumentSnapshot,
+  type QueryDocumentSnapshot,
   writeBatch,
-  SnapshotOptions,
-  FirestoreDataConverter,
-  DocumentData,
+  type SnapshotOptions,
+  type FirestoreDataConverter,
+  type DocumentData,
 } from "firebase/firestore";
-import { auth, db } from "./firebase";
+import { auth, db } from "@/lib/firebase";
 import type {
   User,
   AppRecord,

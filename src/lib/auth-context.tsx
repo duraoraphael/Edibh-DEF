@@ -7,18 +7,17 @@ import {
   useState,
   ReactNode,
   useCallback,
+  useRef,
 } from "react";
 import {
   onAuthStateChanged,
-  signInWithEmailAndPassword,
-  createUserWithEmailAndPassword,
-  sendPasswordResetEmail,
-  updateProfile,
   signOut as firebaseSignOut,
   User as FirebaseUser,
 } from "firebase/auth";
-import { doc, getDoc, onSnapshot, setDoc, updateDoc, serverTimestamp } from "firebase/firestore";
+import { doc, onSnapshot } from "firebase/firestore";
 import { auth, db } from "./firebase";
+import { signInAccount, signUpAccount, recoverCurrentProfile, resetAccountPassword } from "./auth-service";
+import { withDeadline } from "./upload-policy";
 import { writeAuditLog } from "./firestore-helpers";
 import type { User } from "@/types";
 
@@ -30,6 +29,7 @@ interface AuthContextValue {
   signUp: (name: string, email: string, password: string) => Promise<void>;
   resetPassword: (email: string) => Promise<void>;
   signOut: () => Promise<void>;
+  recoverProfile: () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextValue>({
@@ -40,21 +40,24 @@ const AuthContext = createContext<AuthContextValue>({
   signUp: async () => {},
   resetPassword: async () => {},
   signOut: async () => {},
+  recoverProfile: async () => {},
 });
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<FirebaseUser | null>(null);
   const [profile, setProfile] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
+  const [busy, setBusy] = useState(false);
+  const actionLock = useRef(false);
 
   useEffect(() => {
     const unsub = onAuthStateChanged(auth, (fbUser) => {
+      setProfile(null);
+      setLoading(!!fbUser);
       setUser(fbUser);
       if (!fbUser) {
         setProfile(null);
         setLoading(false);
-      } else {
-        updateDoc(doc(db, "users", fbUser.uid), { lastActive: serverTimestamp() }).catch(() => {});
       }
     });
     return () => unsub();
@@ -62,10 +65,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     if (!user) return;
+    const timer = setTimeout(() => {
+      console.error("auth.profile.failed", { operation: "users.subscribe", code: "app/deadline-exceeded" });
+      setLoading(false);
+    }, 25000);
     const ref = doc(db, "users", user.uid);
     const unsub = onSnapshot(
       ref,
       (snap) => {
+        clearTimeout(timer);
+        if (auth.currentUser?.uid !== user.uid) return;
         if (snap.exists()) {
           setProfile({ id: snap.id, ...(snap.data() as Omit<User, "id">) });
         } else {
@@ -73,81 +82,57 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         }
         setLoading(false);
       },
-      () => setLoading(false)
+      (error) => {
+        clearTimeout(timer);
+        if (auth.currentUser?.uid !== user.uid) return;
+        setProfile(null);
+        console.error("auth.profile.failed", { operation: "users.subscribe", code: error.code });
+        setLoading(false);
+      }
     );
-    return () => unsub();
+    return () => { clearTimeout(timer); unsub(); };
   }, [user]);
 
-  const signIn = useCallback(async (email: string, password: string) => {
-    const check = await fetch("/api/auth/login-check", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ email, password }),
-    });
-    if (check.status === 429 || check.status === 503) {
-      const retryAfter = check.headers.get("Retry-After");
-      const err = new Error("rate-limited") as Error & { code: string };
-      err.code = "auth/too-many-requests";
-      throw retryAfter ? Object.assign(err, { retryAfter }) : err;
-    }
-    if (!check.ok) {
-      const err = new Error("invalid-credential") as Error & { code: string };
-      err.code = "auth/invalid-credential";
-      throw err;
-    }
-
-    const credential = await signInWithEmailAndPassword(auth, email, password);
-    await updateDoc(doc(db, "users", credential.user.uid), {
-      lastActive: serverTimestamp(),
-    }).catch(() => {});
-    try {
-      const snap = await getDoc(doc(db, "users", credential.user.uid));
-      const data = snap.exists() ? (snap.data() as Omit<User, "id">) : null;
-      await writeAuditLog(
-        {
-          uid: credential.user.uid,
-          name: data?.name || credential.user.email || undefined,
-          role: data?.role,
-        },
-        { action: "Login" }
-      );
-    } catch {}
+  const runAccountAction = useCallback(async (work: () => Promise<User>) => {
+    if (actionLock.current) return;
+    actionLock.current = true;
+    setBusy(true);
+    try { setProfile(await work()); }
+    finally { actionLock.current = false; setBusy(false); setLoading(false); }
   }, []);
+
+  const signIn = useCallback(async (email: string, password: string) => {
+    await runAccountAction(async () => {
+      const data = await signInAccount(email, password);
+      void withDeadline(writeAuditLog({ uid: data.id, name: data.name, role: data.role }, { action: "Login" }), 5000)
+        .catch(error => console.error("auth.audit.failed", { code: error?.code || "unknown" }));
+      return data;
+    });
+  }, [runAccountAction]);
 
   const signUp = useCallback(async (name: string, email: string, password: string) => {
-    const gate = await fetch("/api/auth/abuse-check", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ flow: "signup", email }) });
-    if (!gate.ok) { const err = new Error("rate-limited") as Error & { code: string }; err.code = "auth/too-many-requests"; throw err; }
-    const credential = await createUserWithEmailAndPassword(auth, email, password);
-    await updateProfile(credential.user, { displayName: name });
-    await setDoc(doc(db, "users", credential.user.uid), {
-      name,
-      email,
-      role: "visualizador",
-      status: "pendente",
-      avatarUrl: "",
-      department: "",
-      lastActive: serverTimestamp(),
-      createdAt: serverTimestamp(),
-    });
-  }, []);
+    await runAccountAction(() => signUpAccount(name, email, password));
+  }, [runAccountAction]);
+
+  const recoverProfile = useCallback(async () => {
+    await runAccountAction(recoverCurrentProfile);
+  }, [runAccountAction]);
 
   const resetPassword = useCallback(async (email: string) => {
-    const gate = await fetch("/api/auth/abuse-check", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ flow: "reset", email }) });
-    if (!gate.ok) { const err = new Error("rate-limited") as Error & { code: string }; err.code = "auth/too-many-requests"; throw err; }
-    await sendPasswordResetEmail(auth, email).catch(() => undefined);
+    await resetAccountPassword(email, new URL("/login", window.location.origin).href);
   }, []);
 
   const signOut = useCallback(async () => {
     try {
       if (auth.currentUser) {
-        await writeAuditLog(
+        await withDeadline(writeAuditLog(
           {
             uid: auth.currentUser.uid,
             name: profile?.name || auth.currentUser.email || undefined,
             role: profile?.role,
           },
           { action: "Logout" }
-        );
+        ), 5000);
       }
     } catch {}
     await firebaseSignOut(auth);
@@ -155,7 +140,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   return (
     <AuthContext.Provider
-      value={{ user, profile, loading, signIn, signUp, resetPassword, signOut }}
+      value={{ user, profile, loading: loading || busy, signIn, signUp, resetPassword, signOut, recoverProfile }}
     >
       {children}
     </AuthContext.Provider>

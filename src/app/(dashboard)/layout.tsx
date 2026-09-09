@@ -9,20 +9,12 @@ import { Topbar } from "@/components/layout/topbar";
 import { Footer } from "@/components/layout/footer";
 import { CommandPalette } from "@/components/layout/command-palette";
 import { SearchProvider } from "@/components/layout/search-context";
+import { isApprovedProfile as isApproved, isUsableProfile } from "@/lib/access-policy";
 import { isRouteAllowed } from "@/lib/forms";
 import { Button } from "@/components/ui/button";
 import type { User } from "@/types";
-
-/**
- * Mirrors the Firestore/Storage rules' `isApprovedUser()`: a missing
- * `status` (legacy accounts) is grandfathered in as approved; only accounts
- * explicitly not "ativo" are blocked. This is a UX convenience only — the
- * actual access control lives in firestore.rules / storage.rules, which deny
- * reads to a non-approved account regardless of what this component renders.
- */
-function isApproved(profile: User | null): boolean {
-  return !profile?.status || profile.status === "ativo";
-}
+import { toast } from "sonner";
+import { authErrorMessage } from "@/lib/auth-errors";
 
 function PendingApprovalScreen({ profile, onSignOut }: { profile: User; onSignOut: () => void }) {
   const rejected = profile.status === "rejeitado" || profile.status === "inativo";
@@ -54,7 +46,7 @@ function PendingApprovalScreen({ profile, onSignOut }: { profile: User; onSignOu
 }
 
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
-  const { user, profile, loading, signOut } = useAuth();
+  const { user, profile, loading, signOut, recoverProfile } = useAuth();
   const router = useRouter();
   const pathname = usePathname();
 
@@ -74,6 +66,17 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
         <Loader2 className="h-6 w-6 animate-spin text-primary" />
       </div>
     );
+  }
+
+  if (!profile || !isUsableProfile(profile, user.uid, user.email)) {
+    return <div className="flex min-h-screen flex-col items-center justify-center gap-4 p-8 text-center">
+      <ShieldAlert className="h-10 w-10 text-destructive" />
+      <h1>Não foi possível carregar seu perfil de acesso.</h1>
+      <p>Tente recarregar a página. Se persistir, peça ao administrador para verificar seu cadastro.</p>
+      <Button onClick={() => window.location.reload()}>Tentar novamente</Button>
+      <Button onClick={() => recoverProfile().catch(error => toast.error(authErrorMessage(error?.code)))}>Recuperar cadastro</Button>
+      <Button variant="outline" onClick={() => signOut()}>Sair</Button>
+    </div>;
   }
 
   if (profile && !isApproved(profile)) {

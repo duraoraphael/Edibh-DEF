@@ -1,12 +1,13 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { motion } from "framer-motion";
 import { Info, Leaf, Loader2 } from "lucide-react";
 import { toast } from "sonner";
 import { useAuth } from "@/lib/auth-context";
+import { authErrorMessage, normalizeEmail } from "@/lib/auth-errors";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -20,6 +21,7 @@ export default function SignupPage() {
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [submitting, setSubmitting] = useState(false);
+  const submitLock = useRef(false);
 
   useEffect(() => {
     if (!loading && user) router.replace("/dashboard");
@@ -27,6 +29,7 @@ export default function SignupPage() {
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
+    if (submitLock.current) return;
     if (password !== confirmPassword) {
       toast.error("As senhas não coincidem");
       return;
@@ -35,14 +38,17 @@ export default function SignupPage() {
       toast.error("A senha deve ter ao menos 6 caracteres");
       return;
     }
+    submitLock.current = true;
     setSubmitting(true);
     try {
       await signUp(name, email, password);
       toast.success("Conta criada como Visualizador. Aguarde a aprovação de um administrador para liberar mais acessos.");
       router.replace("/dashboard");
-    } catch {
-      toast.error("Não foi possível criar a conta. Tente novamente.");
+    } catch (error) {
+      console.error("auth.signup.failed", { code: (error as { code?: string }).code || "unknown" });
+      toast.error(authErrorMessage((error as { code?: string }).code));
     } finally {
+      submitLock.current = false;
       setSubmitting(false);
     }
   }
@@ -92,7 +98,7 @@ export default function SignupPage() {
                 required
                 placeholder="seu.nome@empresa.com"
                 value={email}
-                onChange={(e) => setEmail(e.target.value)}
+                onChange={(e) => setEmail(normalizeEmail(e.target.value))}
               />
             </div>
             <div className="flex flex-col gap-1.5">

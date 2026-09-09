@@ -40,12 +40,15 @@ service firebase.storage {
 
     match /attachments/{userId}/{allPaths=**} {
       allow read: if isSignedIn() && (request.auth.uid == userId || isPrivileged());
-      allow write: if isSignedIn() && request.auth.uid == userId && isValidAttachment();
+      allow create, update: if isApprovedUser() && role() != 'visualizador'
+        && request.auth.uid == userId && isValidAttachment();
+      allow delete: if isApprovedUser() && request.auth.uid == userId;
     }
 
     match /avatars/{userId} {
       allow read: if isSignedIn();
-      allow write: if isSignedIn() && request.auth.uid == userId && isValidAvatar();
+      allow create, update: if isSignedIn() && request.auth.uid == userId && isValidAvatar();
+      allow delete: if isSignedIn() && request.auth.uid == userId;
     }
   }
 }

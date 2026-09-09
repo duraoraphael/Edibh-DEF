@@ -7,9 +7,9 @@ import {
   type RulesTestEnvironment,
 } from "@firebase/rules-unit-testing";
 import { setDoc, doc } from "firebase/firestore";
-import { getBytes, ref, uploadBytes } from "firebase/storage";
+import { deleteObject, getBytes, ref, uploadBytes } from "firebase/storage";
 
-const PROJECT_ID = "edibh-def-storage-rules-test";
+const PROJECT_ID = process.env.GCLOUD_PROJECT || "edibh-def-rules-test";
 
 let testEnv: RulesTestEnvironment;
 
@@ -59,6 +59,27 @@ test("owner can upload and read their own attachment", async () => {
   await assertSucceeds(uploadBytes(fileRef, tinyPng, { contentType: "image/png" }));
   await assertSucceeds(getBytes(fileRef));
 });
+
+test("owner can delete; another user and unauthenticated client cannot", async () => {
+  const path = "attachments/owner-uid/rec1/delete.png";
+  const owner = ref(testEnv.authenticatedContext("owner-uid").storage(), path);
+  await assertSucceeds(uploadBytes(owner, tinyPng, { contentType: "image/png" }));
+  await assertFails(deleteObject(ref(testEnv.authenticatedContext("other-tecnico-uid").storage(), path)));
+  await assertFails(deleteObject(ref(testEnv.unauthenticatedContext().storage(), path)));
+  await assertSucceeds(deleteObject(owner));
+});
+
+test("pending account cannot upload even to its own folder", async () => {
+  const target = ref(testEnv.authenticatedContext("pending-admin-uid").storage(), "attachments/pending-admin-uid/rec1/a.png");
+  await assertFails(uploadBytes(target, tinyPng, { contentType: "image/png" }));
+});
+
+for (const type of ["image/jpeg", "image/png", "image/webp"]) {
+  test(`allowed image MIME ${type}`, async () => {
+    const target = ref(testEnv.authenticatedContext("owner-uid").storage(), "attachments/owner-uid/rec1/image");
+    await assertSucceeds(uploadBytes(target, tinyPng, { contentType: type }));
+  });
+}
 
 test("upload is rejected for a disallowed content type", async () => {
   const storage = testEnv.authenticatedContext("owner-uid").storage();

@@ -8,13 +8,15 @@
     "start": "next start",
     "lint": "eslint",
     "typecheck": "tsc --noEmit",
-    "test": "npm run test:email && npm run test:record-number && npm run test:security && npm run test:attachment-url && npm run test:email-template-xss && npm run test:rules && playwright test",
+    "test:upload": "node --experimental-strip-types --experimental-test-module-mocks --import ./tests/support/register.mjs --test tests/upload-policy.test.ts tests/attachment-upload.test.ts",
+    "test": "npm run test:auth && npm run test:email && npm run test:record-number && npm run test:security && npm run test:attachment-url && npm run test:email-template-xss && npm run test:upload && npm run test:rules && playwright test",
     "test:email": "node --experimental-strip-types --import ./tests/support/register.mjs --test tests/email-inline.test.ts",
     "test:record-number": "node --experimental-strip-types --import ./tests/support/register.mjs --test tests/record-number.test.ts",
     "test:security": "node --experimental-strip-types --import ./tests/support/register.mjs --test tests/security.test.ts",
     "test:attachment-url": "node --experimental-strip-types --import ./tests/support/register.mjs --test tests/attachment-url.test.ts",
     "test:email-template-xss": "node --experimental-strip-types --import ./tests/support/register.mjs --test tests/email-template-xss.test.ts",
-    "test:rules": "firebase emulators:exec --only firestore,storage --project edibh-def-rules-test \"node --experimental-strip-types --import ./tests/support/register.mjs --test tests/firestore-rules.test.ts tests/storage-rules.test.ts\""
+    "test:rules": "firebase emulators:exec --only auth,firestore,storage --project demo-upload-fix \"node --experimental-strip-types --experimental-test-module-mocks --import ./tests/support/register.mjs --test --test-concurrency=1 tests/auth-emulator.test.ts tests/auth-flow.integration.test.ts tests/firestore-rules.test.ts tests/storage-rules.test.ts tests/record-upload.integration.test.ts\"",
+    "test:auth": "node --experimental-strip-types --experimental-test-module-mocks --import ./tests/support/register.mjs --test tests/auth-errors.test.ts tests/login-route.test.ts"
   },
   "dependencies": {
     "@radix-ui/react-avatar": "^1.2.1",

@@ -107,7 +107,8 @@ export default function UsersPage() {
     const target = users.find((x) => x.id === userId);
     setUsers((u) => u.map((x) => (x.id === userId ? { ...x, role } : x)));
     try {
-      await updateDoc(doc(db, "users", userId), { role });
+      const status = accountStatus(target || ({} as User));
+      await updateDoc(doc(db, "users", userId), { role, status, approved: status === "ativo" });
       await writeAuditLog(
         { uid: profile?.id, name: profile?.name, role: profile?.role },
         {
@@ -133,7 +134,7 @@ export default function UsersPage() {
     const target = users.find((x) => x.id === userId);
     setUsers((u) => u.map((x) => (x.id === userId ? { ...x, status } : x)));
     try {
-      await updateDoc(doc(db, "users", userId), { status });
+      await updateDoc(doc(db, "users", userId), { status, approved: status === "ativo" });
       await writeAuditLog(
         { uid: profile?.id, name: profile?.name, role: profile?.role },
         {
