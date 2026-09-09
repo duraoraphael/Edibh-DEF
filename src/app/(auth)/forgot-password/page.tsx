@@ -34,7 +34,8 @@ export default function ForgotPasswordPage() {
       await resetPassword(email);
       setSent(true);
     } catch (error) {
-      toast.error(authErrorMessage((error as { code?: string }).code));
+      const failure = error as { code?: string; retryAfter?: string | number };
+      toast.error(authErrorMessage(failure.code, failure.retryAfter));
     } finally {
       submitLock.current = false;
       setSubmitting(false);

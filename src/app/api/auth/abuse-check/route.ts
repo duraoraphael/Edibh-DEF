@@ -4,7 +4,14 @@ import { fixedWindowLimit, rateLimitIdentity } from "@/lib/rate-limit";
 import { normalizeEmail } from "@/lib/auth-errors";
 
 export const OPTIONS = rejectPreflight;
-const policies = { signup: { ip: 5, account: 3, window: "1 h" as const }, reset: { ip: 10, account: 3, window: "1 h" as const } };
+
+// The account quota stops repeated work against one address. The network
+// quota is deliberately only a broad emergency ceiling: many legitimate
+// employees can share one corporate public IP.
+export const policies = {
+  signup: { account: 5, network: 60, window: "1 h" as const },
+  reset: { account: 5, network: 100, window: "1 h" as const },
+};
 
 export async function POST(req: NextRequest) {
   if (!isSameOrigin(req)) return NextResponse.json({ error: "origem não permitida" }, { status: 403 });
@@ -16,8 +23,27 @@ export async function POST(req: NextRequest) {
   const identity = rateLimitIdentity(email);
   if (!identity) return NextResponse.json({ error: "serviço temporariamente indisponível" }, { status: 503, headers: { "Retry-After": "60" } });
   const policy = policies[flow];
-  const results = await Promise.all([fixedWindowLimit(`${flow}:ip`, clientIp(req), policy.ip, policy.window), fixedWindowLimit(`${flow}:account`, identity, policy.account, policy.window)]);
-  const blocked = results.find((result) => !result.success);
-  if (blocked) return NextResponse.json({ error: blocked.unavailable ? "serviço temporariamente indisponível" : "Muitas solicitações. Tente novamente mais tarde." }, { status: blocked.unavailable ? 503 : 429, headers: { "Retry-After": String(blocked.retryAfterSeconds), "Cache-Control": "no-store" } });
+  const network = clientIp(req);
+  const checks = [
+    { scope: "account", promise: fixedWindowLimit(`auth-abuse:v2:${flow}:account`, identity, policy.account, policy.window) },
+    // Never collapse every request without a usable Vercel IP into one
+    // global "unknown" bucket. The HMAC account quota remains mandatory.
+    ...(network === "unknown" ? [] : [{ scope: "network", promise: fixedWindowLimit(`auth-abuse:v2:${flow}:network`, network, policy.network, policy.window) }]),
+  ];
+  const results = await Promise.all(checks.map(async check => ({ scope: check.scope, result: await check.promise })));
+  const blocked = results.find(({ result }) => !result.success);
+  if (blocked) {
+    const { result, scope } = blocked;
+    const status = result.unavailable ? 503 : 429;
+    console.warn("auth.abuse.blocked", { flow, scope, status, retryAfterSeconds: result.retryAfterSeconds });
+    return NextResponse.json(
+      {
+        error: result.unavailable ? "serviço temporariamente indisponível" : "Muitas solicitações. Tente novamente mais tarde.",
+        code: result.unavailable ? "auth/service-unavailable" : "app/rate-limited",
+        retryAfterSeconds: result.retryAfterSeconds,
+      },
+      { status, headers: { "Retry-After": String(result.retryAfterSeconds), "Cache-Control": "no-store" } }
+    );
+  }
   return NextResponse.json({ ok: true }, { headers: { "Cache-Control": "no-store" } });
 }

@@ -27,12 +27,19 @@ test("production signup, pending session, duplicate, recovery, approved login an
   let uid: string | undefined;
   let signups = 0;
   let logins = 0;
+  let signupGates = 0;
+  let resetGates = 0;
   const unexpected: string[] = [];
   page.on("pageerror", error => unexpected.push(error.name));
   page.on("request", request => {
     const url = new URL(request.url());
     if (url.hostname === "identitytoolkit.googleapis.com" && url.pathname.endsWith(":signUp")) signups++;
     if (url.hostname === "identitytoolkit.googleapis.com" && url.pathname.endsWith(":signInWithPassword")) logins++;
+    if (url.hostname === "fluxocriticos.vercel.app" && url.pathname === "/api/auth/abuse-check" && request.method() === "POST") {
+      const body = request.postData() || "";
+      if (body.includes('"flow":"signup"')) signupGates++;
+      if (body.includes('"flow":"reset"')) resetGates++;
+    }
   });
   async function lookup() {
     const result = await api(`${authBase}/accounts:lookup`, { method: "POST", body: JSON.stringify({ email: [email] }) });
@@ -55,7 +62,7 @@ test("production signup, pending session, duplicate, recovery, approved login an
     await page.getByRole("button", { name: "Criar conta", exact: true }).click();
     await expect(page.getByRole("heading", { name: "Aguardando aprovação" })).toBeVisible({ timeout: 35000 });
     const account = await lookup(); uid = account?.localId;
-    expect(uid).toBeTruthy(); expect(signups).toBe(1);
+    expect(uid).toBeTruthy(); expect(signups).toBe(1); expect(signupGates).toBe(1);
     await fs.mkdir("recovery/auth-probes", { recursive: true });
     await fs.writeFile(`recovery/auth-probes/${uid}.json`, JSON.stringify({ uid, email, project, disposable: true }));
     const profile = await api(`${base}/users/${uid}`);
@@ -81,11 +88,13 @@ test("production signup, pending session, duplicate, recovery, approved login an
     await page.getByLabel("Confirmar senha", { exact: true }).fill(password);
     await page.getByRole("button", { name: "Criar conta", exact: true }).click();
     await expect(page.getByText(/Se você já possui uma conta/)).toBeVisible({ timeout: 20000 });
+    expect(signupGates).toBe(2);
     }
     await page.goto("/forgot-password");
     await page.getByLabel("E-mail", { exact: true }).fill(email);
     await page.getByRole("button", { name: /Enviar/ }).click();
     await expect(page.getByRole("heading", { name: "Verifique seu e-mail" })).toBeVisible({ timeout: 20000 });
+    expect(resetGates).toBe(1);
     // Verify orphan repair against published rules, deleting only this test's profile.
     await api(`${base}/users/${uid}`, { method: "DELETE" });
     await login();
@@ -99,7 +108,7 @@ test("production signup, pending session, duplicate, recovery, approved login an
     await page.reload();
     await expect(page.getByRole("heading", { name: /Dashboard/ })).toBeVisible({ timeout: 20000 });
     expect(unexpected).toEqual([]);
-    console.log(JSON.stringify({ result: "passed", uid, signups, logins, browser: process.env.AUTH_TEST_BROWSER || "chrome", duplicateTested: process.env.AUTH_TEST_SKIP_DUPLICATE !== "1", target: baseURL }));
+    console.log(JSON.stringify({ result: "passed", uid, signups, logins, signupGates, resetGates, browser: process.env.AUTH_TEST_BROWSER || "chrome", duplicateTested: process.env.AUTH_TEST_SKIP_DUPLICATE !== "1", target: baseURL }));
   } finally {
     // Even assertion failures may follow successful account creation. Resolve exact email first.
     const account = await lookup();

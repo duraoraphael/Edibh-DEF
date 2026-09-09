@@ -224,6 +224,7 @@
           && request.resource.data.actorId == request.auth.uid
           && request.resource.data.actorRole == role()
           && request.resource.data.actorName == userDoc().data.name
+          && request.resource.data.createdAt == request.time
           && request.resource.data.action is string
           && request.resource.data.action.size() <= 100
           && request.resource.data.keys().hasOnly([

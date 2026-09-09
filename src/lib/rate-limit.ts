@@ -36,9 +36,15 @@ export async function fixedWindowLimit(namespace: string, identity: string, limi
     const seconds = match ? Number(match[1]) * ({ s: 1, m: 60, h: 3600 }[match[2]] || 1) : 60;
     return memoryLimit(`${namespace}:${identity}`, limit, seconds);
   }
-  const limiter = new Ratelimit({ redis, limiter: Ratelimit.fixedWindow(limit, window), prefix: `rl:${namespace}` });
-  const result = await limiter.limit(identity);
-  return { success: result.success, retryAfterSeconds: result.success ? 0 : Math.max(1, Math.ceil((result.reset - Date.now()) / 1000)) };
+  try {
+    const limiter = new Ratelimit({ redis, limiter: Ratelimit.fixedWindow(limit, window), prefix: `rl:${namespace}` });
+    const result = await limiter.limit(identity);
+    return { success: result.success, retryAfterSeconds: result.success ? 0 : Math.max(1, Math.ceil((result.reset - Date.now()) / 1000)) };
+  } catch {
+    // Authentication abuse gates fail closed, but callers can distinguish an
+    // unavailable limiter (503) from a real exhausted quota (429).
+    return { success: false, retryAfterSeconds: 60, unavailable: true };
+  }
 }
 
 const LOGIN_LOCK_SECONDS = 15 * 60;

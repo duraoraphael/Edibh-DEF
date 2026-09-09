@@ -36,10 +36,11 @@ export default function LoginPage() {
       toast.success("Login realizado com sucesso");
       router.replace("/dashboard");
     } catch (error) {
-      const code = (error as { code?: string })?.code;
+      const failure = error as { code?: string; retryAfter?: string | number };
+      const code = failure?.code;
       // Keep logs free of provider messages, which can contain user input.
       console.error("[LoginPage] signIn failed", { code: code || "unknown" });
-      toast.error(authErrorMessage(code));
+      toast.error(authErrorMessage(code, failure.retryAfter));
     } finally {
       submitLock.current = false;
       setSubmitting(false);

@@ -247,7 +247,10 @@ export default function NewRecordPage() {
         await withDeadline(operation);
         setSavedAt(new Date());
       } catch (error) {
-        logFirestoreError({ fn: "persistDraft", payload }, error);
+        logFirestoreError({
+          fn: "persistDraft", operation: "transaction.set", collection: "records",
+          documentPath: `records/${draftId}`, userUid: user.uid, userRole: profile?.role, payload,
+        }, error);
         throw error;
       } finally {
         setSavingDraft(false);
@@ -564,7 +567,10 @@ export default function NewRecordPage() {
           href: "/approvals",
         }), 5000);
       } catch (error) {
-        logFirestoreError({ fn: "handleSubmit:createNotifications" }, error);
+        logFirestoreError({
+          fn: "handleSubmit:createNotifications", operation: "batch.create",
+          collection: "notifications", userUid: user.uid, userRole: actor.role,
+        }, error);
       }
 
       window.localStorage.removeItem(`edibh_draft_${draftId}`);
@@ -574,7 +580,12 @@ export default function NewRecordPage() {
         : `Registro ${recordNumber} enviado para aprovação`);
       router.push("/records");
     } catch (error) {
-      logFirestoreError({ fn: `handleSubmit:${operation}` }, error);
+      logFirestoreError({
+        fn: `handleSubmit:${operation}`, operation,
+        collection: "settings,records,approvals,logs",
+        documentPath: `settings/recordCounter_${new Date().getFullYear()},records/${draftId},approvals/${draftId},logs/{autoId}`,
+        userUid: user.uid, userRole: profile?.role,
+      }, error);
       toast.error(getFirebaseErrorMessage(error, "Não foi possível enviar o registro."));
     } finally {
       submitLock.current = false;

@@ -10,6 +10,9 @@ import {
   type SnapshotOptions,
   type FirestoreDataConverter,
   type DocumentData,
+  serverTimestamp,
+  Timestamp,
+  type WithFieldValue,
 } from "firebase/firestore";
 import { auth, db } from "@/lib/firebase";
 import type {
@@ -43,7 +46,20 @@ export const userConverter = makeConverter<User>();
 export const recordConverter = makeConverter<AppRecord>();
 export const approvalConverter = makeConverter<Approval>();
 export const formDefinitionConverter = makeConverter<FormDefinition>();
-export const logConverter = makeConverter<LogEntry>();
+export const logConverter: FirestoreDataConverter<LogEntry> = {
+  toFirestore(data: WithFieldValue<LogEntry>): DocumentData {
+    const { id, ...rest } = data as WithFieldValue<LogEntry> & { id: string };
+    void id;
+    return rest;
+  },
+  fromFirestore(snapshot, options): LogEntry {
+    const data = snapshot.data(options);
+    const createdAt = data.createdAt instanceof Timestamp
+      ? data.createdAt.toDate().toISOString()
+      : data.createdAt;
+    return { id: snapshot.id, ...data, createdAt } as LogEntry;
+  },
+};
 export const emailLogConverter = makeConverter<EmailRecordLog>();
 export const notificationConverter = makeConverter<AppNotification>();
 
@@ -116,8 +132,8 @@ export interface AuditEntryInput {
   detail?: string;
 }
 
-export function buildAuditLogData(actor: AuditActor, entry: AuditEntryInput): LogEntry {
-  const payload: LogEntry = {
+export function buildAuditLogData(actor: AuditActor, entry: AuditEntryInput): WithFieldValue<LogEntry> {
+  const payload: WithFieldValue<LogEntry> = {
     id: "",
     action: entry.action,
     recordId: entry.recordId ?? "",
@@ -128,11 +144,11 @@ export function buildAuditLogData(actor: AuditActor, entry: AuditEntryInput): Lo
     actorName: actor.name,
     actorRole: actor.role,
     detail: entry.detail,
-    createdAt: new Date().toISOString(),
+    createdAt: serverTimestamp(),
   };
   return Object.fromEntries(
     Object.entries(payload).filter(([, value]) => value !== undefined)
-  ) as unknown as LogEntry;
+  ) as WithFieldValue<LogEntry>;
 }
 
 /**

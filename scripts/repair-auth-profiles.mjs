@@ -18,6 +18,7 @@ const profiles = await api(`${base}/users?pageSize=1000`);
 if (accounts.nextPageToken || profiles.nextPageToken) throw new Error('Incomplete inventory: stop before repair');
 const users = accounts.users || [];
 const docs = profiles.documents || [];
+const ttl = await api(`https://firestore.googleapis.com/v1/projects/${project}/databases/(default)/collectionGroups/users/fields?filter=${encodeURIComponent('ttlConfig:*')}`);
 const ids = new Set(docs.map(d=>d.name.split('/').at(-1)));
 const authIds = new Set(users.map(u=>u.localId));
 const missing = users.filter(u=>!ids.has(u.localId));
@@ -26,6 +27,7 @@ const plan = {
   firestoreOnly: docs.filter(d=>!authIds.has(d.name.split('/').at(-1))).map(d=>d.name.split('/').at(-1)),
   incomplete: docs.filter(d=>!d.fields?.name?.stringValue || !d.fields?.email?.stringValue || !['admin','gerente','tecnico','visualizador'].includes(d.fields?.role?.stringValue)).map(d=>d.name.split('/').at(-1)),
   uidMismatch: docs.filter(d=>d.fields?.uid && d.fields.uid.stringValue !== d.name.split('/').at(-1)).map(d=>d.name.split('/').at(-1)),
+  ttlFields: (ttl.fields || []).filter(field=>field.ttlConfig).map(field=>({ field: field.name.split('/').at(-1), state: field.ttlConfig.state })),
 };
 console.log(JSON.stringify(plan, null, 2));
 await fs.mkdir('recovery/auth-repair', { recursive: true });

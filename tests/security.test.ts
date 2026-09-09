@@ -24,6 +24,14 @@ test("generic limits return Retry-After data after the configured quota", async 
   assert.ok(blocked.retryAfterSeconds > 0);
 });
 
+test("generic fixed-window counters expire automatically", async () => {
+  const id = crypto.randomUUID();
+  assert.equal((await fixedWindowLimit("expiry", id, 1, "1 s")).success, true);
+  assert.equal((await fixedWindowLimit("expiry", id, 1, "1 s")).success, false);
+  await new Promise(resolve => setTimeout(resolve, 1_050));
+  assert.equal((await fixedWindowLimit("expiry", id, 1, "1 s")).success, true);
+});
+
 test("Firebase rules retain deny-by-default and protected role/attachment checks", async () => {
   const [firestore, storage] = await Promise.all([
     readFile(new URL("../firestore.rules", import.meta.url), "utf8"),

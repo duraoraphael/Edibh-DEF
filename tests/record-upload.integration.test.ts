@@ -76,7 +76,9 @@ test("submission commits mandatory audit; invalid actor rolls back the record an
   const number = await create("with-audit", record, approval, actor);
   await env.withSecurityRulesDisabled(async context => {
     const logs = await getDocs(collection(context.firestore(), "logs"));
-    assert.equal(logs.docs.filter(d => d.data().recordId === "with-audit").length, 1);
+    const log = logs.docs.find(d => d.data().recordId === "with-audit");
+    assert.ok(log);
+    assert.equal(typeof log.data().createdAt?.toDate, "function", "audit timestamp must be assigned by Firestore");
   });
   await create("with-audit", record, approval, actor);
   await assert.rejects(create("bad-audit", record, approval, { ...actor, name: "Forged" }));

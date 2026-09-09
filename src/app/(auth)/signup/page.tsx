@@ -46,7 +46,8 @@ export default function SignupPage() {
       router.replace("/dashboard");
     } catch (error) {
       console.error("auth.signup.failed", { code: (error as { code?: string }).code || "unknown" });
-      toast.error(authErrorMessage((error as { code?: string }).code));
+      const failure = error as { code?: string; retryAfter?: string | number };
+      toast.error(authErrorMessage(failure.code, failure.retryAfter));
     } finally {
       submitLock.current = false;
       setSubmitting(false);

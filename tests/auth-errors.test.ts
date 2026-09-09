@@ -30,6 +30,11 @@ test("HTTP failures retain service/credential distinction, including non-JSON er
     await assert.rejects(checkAuthResponse(new Response("upstream unavailable", { status })), { code });
   }
 });
+test("rate-limit message uses the exact retry delay", () => {
+  assert.equal(authErrorMessage("app/rate-limited", 121), "Muitas tentativas neste formulário. Tente novamente em 3 minutos.");
+  assert.equal(authErrorMessage("app/rate-limited", 1), "Muitas tentativas neste formulário. Tente novamente em 1 segundo.");
+  assert.match(authErrorMessage("auth/too-many-requests"), /Firebase/);
+});
 test("approval policy rejects missing/invalid profiles and preserves legacy access", () => {
   assert.equal(isApprovedProfile(null), false);
   for (const role of ["admin", "gerente", "tecnico"] as const) {

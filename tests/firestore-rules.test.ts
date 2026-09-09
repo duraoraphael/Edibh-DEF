@@ -108,6 +108,14 @@ test("F1: a pending user cannot read logs", async () => {
   await assertFails(getDoc(doc(ctx("pending-uid"), "logs", "log1")));
 });
 
+test("audit logs require the authenticated profile and a server timestamp", async () => {
+  const db = ctx("tecnico-uid");
+  const base = { action: "Criado", actorId: "tecnico-uid", actorName: "Tecnico 1", actorRole: "tecnico" };
+  await assertSucceeds(setDoc(doc(db, "logs", "trusted-time"), { ...base, createdAt: serverTimestamp() }));
+  await assertFails(setDoc(doc(db, "logs", "forged-time"), { ...base, createdAt: "2026-01-01T00:00:00.000Z" }));
+  await assertFails(setDoc(doc(db, "logs", "forged-role"), { ...base, actorRole: "admin", createdAt: serverTimestamp() }));
+});
+
 test("F1: a pending user cannot read approvals", async () => {
   await assertFails(getDoc(doc(ctx("pending-uid"), "approvals", "rec-pendente")));
 });

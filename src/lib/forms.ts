@@ -74,15 +74,33 @@ export function sanitizeForFirestore<T>(value: T): T {
 interface LogErrorContext {
   fn: string;
   field?: string;
+  operation?: string;
+  collection?: string;
+  documentPath?: string;
+  userUid?: string;
+  userRole?: string;
   payload?: unknown;
 }
 
 export function logFirestoreError(context: LogErrorContext, error: unknown) {
-  const err = error as { code?: string };
+  const err = error as { code?: string; message?: string; name?: string };
+  const safeMessage = typeof err?.message === "string"
+    ? err.message
+        .replace(/[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}/g, "[email omitted]")
+        .replace(/Bearer\s+[A-Za-z0-9._~-]+/gi, "Bearer [token omitted]")
+        .slice(0, 300)
+    : "";
   console.error("firestore.operation.failed", {
     function: context.fn,
     field: context.field,
     code: err?.code || "unknown",
+    message: safeMessage,
+    name: err?.name || "Error",
+    operation: context.operation,
+    collection: context.collection,
+    documentPath: context.documentPath,
+    userUid: context.userUid,
+    userRole: context.userRole,
   });
 }
 
