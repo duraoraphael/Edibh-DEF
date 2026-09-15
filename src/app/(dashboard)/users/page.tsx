@@ -11,6 +11,7 @@ import { usersCol, writeAuditLog } from "@/lib/firestore-helpers";
 import { db } from "@/lib/firebase";
 import { useAuth } from "@/lib/auth-context";
 import { roleLabels } from "@/lib/forms";
+import { accountStatus as resolvedAccountStatus } from "@/lib/access-policy";
 import type { User, UserRole } from "@/types";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
@@ -36,7 +37,7 @@ const accountStatusLabels: Record<AccountStatus, string> = {
 };
 
 function accountStatus(u: User): AccountStatus {
-  return u.status || "ativo";
+  return resolvedAccountStatus(u);
 }
 
 function accountStatusVariant(status: AccountStatus): "success" | "warning" | "destructive" | "secondary" {

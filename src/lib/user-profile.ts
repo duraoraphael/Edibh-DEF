@@ -3,7 +3,7 @@ import { doc, runTransaction, serverTimestamp } from "firebase/firestore";
 import { auth, db } from "@/lib/firebase";
 import { authError, normalizeEmail } from "@/lib/auth-errors";
 import type { User } from "@/types";
-import { isUsableProfile } from "@/lib/access-policy";
+import { normalizeUserProfile } from "@/lib/access-policy";
 
 export function initialUserProfile(uid: string, name: string, email: string) {
   return {
@@ -24,9 +24,7 @@ export async function ensureOwnProfile(user: FirebaseUser, name?: string): Promi
     tx.set(ref, profile);
     return profile;
   });
-  const profile = { ...data, id: user.uid } as User;
-  if (!isUsableProfile(profile, user.uid, user.email)) {
-    throw authError("app/profile-incomplete");
-  }
-  return profile;
+  // Preserve stored roles/approval; normalize old optional fields in memory.
+  // An unknown role becomes viewer, so compatibility never elevates access.
+  return normalizeUserProfile(data as Partial<User>, user.uid, user.email, user.displayName);
 }

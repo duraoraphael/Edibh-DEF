@@ -5,8 +5,8 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { motion } from "framer-motion";
 import { Leaf, Loader2, MailCheck } from "lucide-react";
-import { toast } from "sonner";
-import { authErrorMessage, normalizeEmail } from "@/lib/auth-errors";
+import { normalizeEmail } from "@/lib/auth-errors";
+import { PASSWORD_RESET_SUCCESS, PASSWORD_RESET_PROVIDER_NOTICE, passwordResetErrorMessage } from "@/lib/password-reset";
 import { useAuth } from "@/lib/auth-context";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -19,6 +19,7 @@ export default function ForgotPasswordPage() {
   const [email, setEmail] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [sent, setSent] = useState(false);
+  const [errorMessage, setErrorMessage] = useState("");
   const submitLock = useRef(false);
 
   useEffect(() => {
@@ -29,13 +30,13 @@ export default function ForgotPasswordPage() {
     e.preventDefault();
     if (submitLock.current) return;
     submitLock.current = true;
+    setErrorMessage("");
     setSubmitting(true);
     try {
       await resetPassword(email);
       setSent(true);
     } catch (error) {
-      const failure = error as { code?: string; retryAfter?: string | number };
-      toast.error(authErrorMessage(failure.code, failure.retryAfter));
+      setErrorMessage(passwordResetErrorMessage(error));
     } finally {
       submitLock.current = false;
       setSubmitting(false);
@@ -59,7 +60,7 @@ export default function ForgotPasswordPage() {
               <div>
                 <h1 className="text-xl font-semibold tracking-tight">Verifique seu e-mail</h1>
                 <p className="mt-1 text-sm text-muted-foreground">
-                  Se houver uma conta para o endereço informado, ela receberá um link de redefinição.
+                  {PASSWORD_RESET_SUCCESS}
                 </p>
               </div>
               <Link href="/login" className="w-full">
@@ -88,12 +89,19 @@ export default function ForgotPasswordPage() {
                     required
                     placeholder="seu.nome@empresa.com"
                     value={email}
+                    aria-describedby={errorMessage ? "password-reset-error" : undefined}
+                    aria-invalid={errorMessage ? true : undefined}
                     onChange={(e) => setEmail(normalizeEmail(e.target.value))}
                   />
                 </div>
-                <Button type="submit" className="mt-2 h-11" disabled={submitting}>
+                {errorMessage && (
+                  <p id="password-reset-error" role="alert" className="text-sm text-destructive">
+                    {errorMessage}
+                  </p>
+                )}
+                <Button type="submit" className="mt-2 h-11" disabled={submitting} aria-busy={submitting}>
                   {submitting && <Loader2 className="h-4 w-4 animate-spin" />}
-                  Enviar link de redefinição
+                  {submitting ? "Enviando..." : "Enviar link de redefinição"}
                 </Button>
               </form>
               <p className="mt-6 text-center text-sm text-muted-foreground">
@@ -104,6 +112,7 @@ export default function ForgotPasswordPage() {
               </p>
             </>
           )}
+          <p className="mt-4 text-center text-xs text-muted-foreground">{PASSWORD_RESET_PROVIDER_NOTICE}</p>
         </Card>
         <p className="mt-6 text-center text-xs text-muted-foreground">
           © {new Date().getFullYear()} Fluxo de Equipamentos. Todos os direitos reservados.

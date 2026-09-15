@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { authErrorMessage, checkAuthResponse, classifyProviderError, normalizeEmail, providerErrorCode } from "../src/lib/auth-errors.ts";
-import { canSubmitRecord, isApprovedProfile } from "../src/lib/access-policy.ts";
+import { accountStatus, canSubmitRecord, isApprovedProfile, normalizeUserProfile } from "../src/lib/access-policy.ts";
 
 test("email normalization removes edge whitespace and invisible format characters", () => {
   assert.equal(normalizeEmail(" \u200BUSER@Example.COM\uFEFF "), "user@example.com");
@@ -43,4 +43,14 @@ test("approval policy rejects missing/invalid profiles and preserves legacy acce
     for (const status of ["pendente", "inativo", "rejeitado"] as const) assert.equal(canSubmitRecord({ role, status }), false);
   }
   assert.equal(canSubmitRecord({ role: "visualizador", status: "ativo" }), false);
+});
+test("legacy approval and malformed profiles normalize without privilege escalation", () => {
+  assert.equal(accountStatus({ approved: false }), "pendente");
+  assert.equal(accountStatus({ approved: true }), "ativo");
+  assert.equal(accountStatus({}), "ativo");
+  const profile = normalizeUserProfile({ name: "", email: "old@example.com", role: "removed-role" as never, approved: false }, "uid-1", "Current@Example.com");
+  assert.equal(profile.name, "current");
+  assert.equal(profile.email, "current@example.com");
+  assert.equal(profile.role, "visualizador");
+  assert.equal(profile.status, "pendente");
 });

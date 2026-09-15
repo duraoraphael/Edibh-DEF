@@ -48,6 +48,9 @@ export default defineConfig({
     {
       name: 'webkit',
       use: { ...devices['Desktop Safari'] },
+      // Firebase Auth's WebKit transport becomes nondeterministic when many
+      // intercepted password-reset requests share one local test server.
+      fullyParallel: false,
     },
   ],
 

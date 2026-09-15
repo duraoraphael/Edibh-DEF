@@ -82,9 +82,12 @@ test("authorized approval persists across logout/login and profile repair never 
   assert.equal(again.status, "ativo");
   await getDocFromServer(doc(db, "records", "internal"));
 });
-test("incomplete existing profile is preserved and reported for administrator repair", async () => {
+test("incomplete legacy profile authenticates with safe in-memory defaults and is preserved", async () => {
   await env.withSecurityRulesDisabled(ctx => setDoc(doc(ctx.firestore(), "users", uid), { name: "Preserve", email }));
-  await assert.rejects(service.recoverCurrentProfile(), { code: "app/profile-incomplete" });
+  const profile = await service.recoverCurrentProfile();
+  assert.equal(profile.role, "visualizador");
+  assert.equal(profile.status, "ativo");
+  assert.equal(profile.uid, uid);
   assert.equal((await getDocFromServer(doc(db, "users", uid))).data()?.role, undefined);
 });
 test("Firestore-only profile does not create Auth account or authenticate", async () => {

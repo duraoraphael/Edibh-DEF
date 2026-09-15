@@ -20,6 +20,7 @@ import { signInAccount, signUpAccount, recoverCurrentProfile, resetAccountPasswo
 import { withDeadline } from "./upload-policy";
 import { writeAuditLog } from "./firestore-helpers";
 import type { User } from "@/types";
+import { normalizeUserProfile } from "@/lib/access-policy";
 
 interface AuthContextValue {
   user: FirebaseUser | null;
@@ -76,7 +77,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         clearTimeout(timer);
         if (auth.currentUser?.uid !== user.uid) return;
         if (snap.exists()) {
-          setProfile({ id: snap.id, ...(snap.data() as Omit<User, "id">) });
+          setProfile(normalizeUserProfile(snap.data() as Partial<User>, snap.id, user.email, user.displayName));
         } else {
           setProfile(null);
         }

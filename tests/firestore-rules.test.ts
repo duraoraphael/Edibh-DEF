@@ -43,6 +43,7 @@ beforeEach(async () => {
       // Pre-existing account created before the `status` field existed —
       // must still work exactly like an approved account (grandfathered).
       setDoc(doc(db, "users", "legacy-uid"), { name: "Legado", email: "legado@test.local", role: "tecnico" }),
+      setDoc(doc(db, "users", "legacy-pending-uid"), { name: "Legado pendente", email: "legado-pendente@test.local", role: "visualizador", approved: false }),
 
       setDoc(doc(db, "records", "rec-pendente"), {
         authorId: "tecnico-uid", authorName: "Tecnico 1", status: "pendente", data: { instalacao: "A" },
@@ -136,6 +137,11 @@ test("F1: a rejected/deactivated account is denied exactly like a pending one", 
 
 test("F1: a legacy account with no `status` field is grandfathered in as approved", async () => {
   await assertSucceeds(getDoc(doc(ctx("legacy-uid"), "records", "rec-pendente")));
+});
+
+test("F1: a legacy account explicitly marked approved=false remains pending", async () => {
+  await assertFails(getDoc(doc(ctx("legacy-pending-uid"), "records", "rec-pendente")));
+  await assertSucceeds(getDoc(doc(ctx("legacy-pending-uid"), "users", "legacy-pending-uid")));
 });
 
 test("F1: an approved user can read the content their role permits", async () => {

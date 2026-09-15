@@ -15,11 +15,14 @@
       // account is created with status == 'pendente' (see the `users` create
       // rule below) and must stay unable to read internal data until an admin
       // flips it to 'ativo'. Accounts created before this field existed have
-      // no `status` at all — `.get('status', 'ativo')` treats that legacy,
-      // undefined case as already-approved so no existing user is locked out
-      // by this change; only new self-signups start gated.
+      // no `status` at all. The former `approved` flag is honored when present;
+      // only documents that predate both fields receive the active fallback.
       function userStatus() {
-        return userDoc().data.get('status', 'ativo');
+        return userDoc().data.keys().hasAny(['status'])
+          ? userDoc().data.status
+          : (userDoc().data.keys().hasAny(['approved'])
+            ? (userDoc().data.approved == true ? 'ativo' : 'pendente')
+            : 'ativo');
       }
 
       function isApprovedUser() {
@@ -102,7 +105,7 @@
           && request.resource.data.status == 'pendente'
           && request.resource.data.get('uid', userId) == userId
           && request.resource.data.get('approved', false) == false
-          && (!request.resource.data.keys().hasAny(['uid']) || request.resource.data.createdAt == request.time)
+          && (!request.resource.data.keys().hasAny(['createdAt']) || request.resource.data.createdAt == request.time)
           && request.resource.data.email == request.auth.token.email;
         allow update: if (isAdmin()
             && request.resource.data.keys().hasOnly([

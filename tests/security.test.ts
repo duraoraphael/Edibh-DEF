@@ -63,8 +63,10 @@ test("F1: reading internal collections requires an approved account, not just a 
   // A pending/rejected self-signup must never satisfy isApprovedUser().
   assert.match(firestore, /function isApprovedUser\(\)/);
   assert.match(firestore, /userStatus\(\) == 'ativo'/);
-  // Legacy accounts predating the `status` field stay grandfathered in.
-  assert.match(firestore, /data\.get\('status', 'ativo'\)/);
+  // Legacy accounts with neither approval field stay grandfathered in, while
+  // an explicit approved=false cannot accidentally gain access.
+  assert.match(firestore, /keys\(\)\.hasAny\(\['approved'\]\)/);
+  assert.match(firestore, /approved == true \? 'ativo' : 'pendente'/);
 
   for (const collectionMatch of [
     /match \/users\/\{userId\} \{\s*allow read: if ([^;]+);/,

@@ -40,10 +40,16 @@ export async function recoverCurrentProfile() {
 
 export async function resetAccountPassword(email: string, returnUrl?: string) {
   email = normalizeEmail(email);
-  await postAuthGate("/api/auth/abuse-check", { flow: "reset", email });
   try {
-    await step("auth.sendPasswordResetEmail", () => sendPasswordResetEmail(auth, email, returnUrl ? { url: returnUrl } : undefined));
+    if (email.length > 254 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) throw authError("auth/invalid-email");
+    await postAuthGate("/api/auth/abuse-check", { flow: "reset", email });
+    // Await the SDK itself: releasing the UI lock on an artificial deadline
+    // could allow another send while the original request is still running.
+    await sendPasswordResetEmail(auth, email.trim().toLowerCase(), returnUrl ? { url: returnUrl } : undefined);
   } catch (error) {
-    if (!["auth/user-not-found", "auth/user-disabled"].includes((error as { code?: string }).code || "")) throw error;
+    if (process.env.NODE_ENV === "development") {
+      console.error("auth.passwordReset.failed", { code: (error as { code?: string })?.code || "unknown" });
+    }
+    if (!["auth/user-not-found", "auth/user-disabled"].includes((error as { code?: string })?.code || "")) throw error;
   }
 }
