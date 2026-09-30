@@ -1,4 +1,4 @@
-import type { User, UserRole } from "@/types";
+import type { AppRecord, User, UserRole } from "@/types";
 
 const roles: UserRole[] = ["admin", "gerente", "tecnico", "visualizador"];
 const statuses = ["pendente", "ativo", "inativo", "rejeitado"] as const;
@@ -15,6 +15,13 @@ export function isApprovedProfile(profile: Pick<User, "status" | "approved"> | n
 
 export function canSubmitRecord(profile: Pick<User, "role" | "status"> | null): boolean {
   return isApprovedProfile(profile) && ["admin", "gerente", "tecnico"].includes(profile?.role || "");
+}
+
+/** UI/access-layer policy; Firestore rules independently enforce ownership. */
+export function canEditRecord(profile: Pick<User, "role" | "status" | "approved"> | null, uid: string | undefined, record: Pick<AppRecord, "authorId">): boolean {
+  if (!uid || !isApprovedProfile(profile)) return false;
+  return profile?.role === "admin" || profile?.role === "gerente"
+    || (profile?.role === "tecnico" && record.authorId === uid);
 }
 
 export function isUsableProfile(profile: User | null, uid: string, email?: string | null): boolean {

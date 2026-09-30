@@ -183,6 +183,12 @@ test("RBAC: tecnico can edit permitted fields of their own record without touchi
   }));
 });
 
+test("RBAC: tecnico can mark only their own record as CASE", async () => {
+  await assertSucceeds(updateDoc(doc(ctx("tecnico-uid"), "records", "rec-pendente"), { isCase: true, updatedAt: "2026-01-02T00:00:00.000Z" }));
+  await assertFails(updateDoc(doc(ctx("tecnico2-uid"), "records", "rec-pendente"), { isCase: true, updatedAt: "2026-01-02T00:00:00.000Z" }));
+  await assertFails(updateDoc(doc(ctx("tecnico-uid"), "records", "rec-tecnico2"), { isCase: true, updatedAt: "2026-01-02T00:00:00.000Z" }));
+});
+
 test("F2: tecnico cannot self-approve their own record", async () => {
   await assertFails(updateDoc(doc(ctx("tecnico-uid"), "records", "rec-pendente"), {
     status: "aprovado",

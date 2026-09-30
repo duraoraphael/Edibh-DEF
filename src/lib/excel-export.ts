@@ -1,6 +1,7 @@
 import ExcelJS from "exceljs";
-import type { AppRecord, RecordStatus } from "@/types";
-import { fieldValue, statusLabels } from "./forms";
+import type { AppRecord, FormField, RecordStatus } from "@/types";
+import { fieldValue, recordDateForExcel, statusLabels } from "./forms";
+import { formatRecordDataSource } from "./data-source";
 
 const GREEN_DARK = "FF14532D";
 const GREEN = "FF15803D";
@@ -42,9 +43,10 @@ export interface ExportExcelOptions {
   records: AppRecord[];
   userName: string;
   title?: string;
+  formFields?: FormField[];
 }
 
-export async function exportRecordsToExcel({ records, userName, title = "Registros de Equipamentos" }: ExportExcelOptions) {
+export async function exportRecordsToExcel({ records, userName, title = "Registros de Equipamentos", formFields }: ExportExcelOptions) {
   const wb = new ExcelJS.Workbook();
   wb.creator = userName;
   wb.created = new Date();
@@ -62,6 +64,7 @@ export async function exportRecordsToExcel({ records, userName, title = "Registr
     { header: "Data", key: "data", width: 14 },
     { header: "Status", key: "status", width: 20 },
     { header: "Responsável", key: "responsavel", width: 22 },
+    { header: "FONTE DE DADOS", key: "fonteDados", width: 30 },
   ];
   const colCount = columns.length;
 
@@ -118,9 +121,10 @@ export async function exportRecordsToExcel({ records, userName, title = "Registr
       fieldValue(r, "sistema") || "—",
       fieldValue(r, "equipamento") || "—",
       fieldValue(r, "gerencia") || "—",
-      r.createdAt ? new Date(r.createdAt) : null,
+      recordDateForExcel(r, formFields || []),
       statusLabels[r.status] || r.status,
       r.authorName || "—",
+      formatRecordDataSource(r, formFields),
     ];
     values.forEach((v, i) => {
       const cell = row.getCell(i + 1);
@@ -132,6 +136,7 @@ export async function exportRecordsToExcel({ records, userName, title = "Registr
       }
     });
     row.getCell(6).numFmt = "dd/mm/yyyy";
+    row.getCell(9).alignment = { vertical: "middle", wrapText: true };
     const statusCell = row.getCell(7);
     const colors = statusColors[r.status];
     if (colors) {

@@ -42,9 +42,11 @@ import {
 import { db } from "@/lib/firebase";
 import { useAuth } from "@/lib/auth-context";
 import { recordsCol } from "@/lib/firestore-helpers";
-import { DEFAULT_FORM_ID, fieldValue, logFirestoreError, migrateLegacyRecordNumbers, statusIndicatorClass, statusLabels, statusVariant } from "@/lib/forms";
-import type { AppRecord, FormDefinition, FormField, RecordStatus } from "@/types";
+import { DEFAULT_FORM_ID, fieldValue, logFirestoreError, migrateLegacyRecordNumbers, recordDateKey, statusIndicatorClass, statusLabels, statusVariant } from "@/lib/forms";
+import type { AppRecord, FormDefinition, RecordStatus } from "@/types";
 import { cn } from "@/lib/utils";
+import { DistributionChart } from "@/components/dashboard/distribution-chart";
+import { buildDistributionData, DISTRIBUTION_KEYS, distributionLabels, type DistributionKey } from "@/lib/dashboard-distributions";
 
 const ALL = "todos";
 
@@ -52,27 +54,6 @@ const CARD_KEYS = ["total", "pendentes", "aprovados", "rejeitados", "andamento"]
 type CardKey = (typeof CARD_KEYS)[number];
 const CHART_KEYS = ["periodo", "status", "gerencia", "instalacao", "sistema", "responsavel"] as const;
 type ChartKey = (typeof CHART_KEYS)[number];
-const DISTRIBUTION_KEYS = ["gerencia", "instalacao", "sistema", "responsavel", "fonteDados"] as const;
-type DistributionKey = (typeof DISTRIBUTION_KEYS)[number];
-
-const distributionLabels: Record<DistributionKey, string> = {
-  gerencia: "Gerência",
-  instalacao: "Instalação",
-  sistema: "Sistema",
-  responsavel: "Responsável",
-  fonteDados: "Fonte de Dados",
-};
-
-function normalizeFieldName(value: string): string {
-  return value
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .trim()
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "_")
-    .replace(/^_+|_+$/g, "");
-}
-
 const cardMeta: Record<CardKey, { label: string; icon: typeof FileText }> = {
   total: { label: "Total de Registros", icon: FileText },
   pendentes: { label: "Pendentes de Aprovação", icon: Clock },
@@ -99,35 +80,6 @@ const DEFAULT_PREFS: DashboardPrefs = {
   cards: [...CARD_KEYS],
   charts: ["periodo", "status", "gerencia", "instalacao", "sistema", "responsavel"],
 };
-
-function groupCount(records: AppRecord[], keyFn: (r: AppRecord) => string) {
-  const map = new Map<string, number>();
-  records.forEach((r) => {
-    const key = keyFn(r) || "N/D";
-    map.set(key, (map.get(key) || 0) + 1);
-  });
-  return Array.from(map.entries())
-    .map(([name, value]) => ({ name, value, total: value }))
-    .sort((a, b) => b.value - a.value)
-    .slice(0, 10);
-}
-
-function groupFormFieldSelections(records: AppRecord[], field?: FormField) {
-  if (!field) return [];
-
-  const counts = new Map((field.options ?? []).map((option) => [option, 0]));
-  records.forEach((record) => {
-    const rawValue = record.data?.[field.key];
-    const values = Array.isArray(rawValue) ? rawValue : [rawValue];
-    values.forEach((value) => {
-      const selection = value === undefined || value === null ? "" : String(value).trim();
-      if (selection) counts.set(selection, (counts.get(selection) ?? 0) + 1);
-    });
-  });
-
-  return Array.from(counts, ([name, total]) => ({ name, total }))
-    .sort((a, b) => b.total - a.total || a.name.localeCompare(b.name, "pt-BR"));
-}
 
 export default function DashboardPage() {
   const { profile } = useAuth();
@@ -210,9 +162,9 @@ export default function DashboardPage() {
   const anos = useMemo(
     () =>
       Array.from(
-        new Set(submitted.map((r) => (r.createdAt ? String(new Date(r.createdAt).getFullYear()) : "")).filter(Boolean))
+        new Set(submitted.map((r) => recordDateKey(r, formDefinition?.fields || []).slice(0, 4)).filter(Boolean))
       ).sort((a, b) => b.localeCompare(a)),
-    [submitted]
+    [submitted, formDefinition]
   );
 
   const filtered = useMemo(() => {
@@ -223,10 +175,14 @@ export default function DashboardPage() {
     if (equipamentoFilter !== ALL) list = list.filter((r) => fieldValue(r, "equipamento") === equipamentoFilter);
     if (responsavelFilter !== ALL) list = list.filter((r) => r.authorName === responsavelFilter);
     if (statusFilter !== ALL) list = list.filter((r) => r.status === statusFilter);
-    if (anoFilter !== ALL) list = list.filter((r) => r.createdAt && String(new Date(r.createdAt).getFullYear()) === anoFilter);
-    if (mesFilter !== ALL) list = list.filter((r) => r.createdAt && String(new Date(r.createdAt).getMonth() + 1) === mesFilter);
-    if (dateFrom) list = list.filter((r) => r.createdAt && r.createdAt >= dateFrom);
-    if (dateTo) list = list.filter((r) => r.createdAt && r.createdAt <= dateTo + "T23:59:59");
+    if (anoFilter !== ALL) list = list.filter((r) => recordDateKey(r, formDefinition?.fields || []).slice(0, 4) === anoFilter);
+    if (mesFilter !== ALL) list = list.filter((r) => recordDateKey(r, formDefinition?.fields || []).slice(5, 7) === mesFilter.padStart(2, "0"));
+    if (dateFrom || dateTo) {
+      list = list.filter((r) => {
+        const date = recordDateKey(r, formDefinition?.fields || []);
+        return !!date && (!dateFrom || date >= dateFrom) && (!dateTo || date <= dateTo);
+      });
+    }
     return list;
   }, [
     submitted,
@@ -240,6 +196,7 @@ export default function DashboardPage() {
     mesFilter,
     dateFrom,
     dateTo,
+    formDefinition,
   ]);
 
   // KPI counts are computed directly from each record's own `status` field —
@@ -260,12 +217,13 @@ export default function DashboardPage() {
   const chartData = useMemo(() => {
     const map = new Map<string, number>();
     filtered.forEach((r) => {
-      const d = r.createdAt ? new Date(r.createdAt) : null;
-      const key = d ? `${d.getDate()}/${d.getMonth() + 1}` : "N/D";
-      map.set(key, (map.get(key) || 0) + 1);
+      const key = recordDateKey(r, formDefinition?.fields || []);
+      const [, month, day] = key.split("-");
+      const label = key ? `${Number(day)}/${Number(month)}` : "N/D";
+      map.set(label, (map.get(label) || 0) + 1);
     });
     return Array.from(map.entries()).map(([name, total]) => ({ name, total })).reverse();
-  }, [filtered]);
+  }, [filtered, formDefinition]);
 
   const pieData = useMemo(() => {
     const map = new Map<RecordStatus, number>();
@@ -279,30 +237,10 @@ export default function DashboardPage() {
     }));
   }, [filtered]);
 
-  const gerenciaData = useMemo(() => groupCount(filtered, (r) => fieldValue(r, "gerencia")), [filtered]);
-  const instalacaoData = useMemo(() => groupCount(filtered, (r) => fieldValue(r, "instalacao")), [filtered]);
-  const sistemaData = useMemo(() => groupCount(filtered, (r) => fieldValue(r, "sistema")), [filtered]);
-  const responsavelData = useMemo(() => groupCount(filtered, (r) => r.authorName || "N/D"), [filtered]);
-  const fonteDadosField = useMemo(
-    () => formDefinition?.fields.find((field) => {
-      const label = normalizeFieldName(field.label);
-      const key = normalizeFieldName(field.key).replace(/_\d+$/, "");
-      return label === "fonte_de_dados" || key === "fonte_de_dados";
-    }),
-    [formDefinition]
+  const distributionData = useMemo(
+    () => Object.fromEntries(DISTRIBUTION_KEYS.map((key) => [key, buildDistributionData(filtered, key, formDefinition?.fields)])) as Record<DistributionKey, ReturnType<typeof buildDistributionData>>,
+    [filtered, formDefinition]
   );
-  const fonteDadosData = useMemo(
-    () => groupFormFieldSelections(filtered, fonteDadosField),
-    [filtered, fonteDadosField]
-  );
-
-  const barChartFor: Record<DistributionKey, { name: string; total: number }[]> = {
-    gerencia: gerenciaData,
-    instalacao: instalacaoData,
-    sistema: sistemaData,
-    responsavel: responsavelData,
-    fonteDados: fonteDadosData,
-  };
 
   const drafts = useMemo(() => records.filter((r) => r.status === "rascunho").slice(0, 6), [records]);
   const pendingRecords = useMemo(() => filtered.filter((r) => r.status === "pendente").slice(0, 6), [filtered]);
@@ -350,7 +288,7 @@ export default function DashboardPage() {
     mesFilter,
   ].filter((v) => v !== ALL).length + (dateFrom ? 1 : 0) + (dateTo ? 1 : 0);
   const enabledDistributions = DISTRIBUTION_KEYS.filter(
-    (key) => key === "fonteDados" || prefs.charts.includes(key)
+    (key) => key === "fonteDados" || key === "sistemaMacro" || prefs.charts.includes(key)
   );
   const visibleDistribution = enabledDistributions.includes(distributionKey)
     ? distributionKey
@@ -488,19 +426,26 @@ export default function DashboardPage() {
       </section>
 
       {visibleDistribution && (
-        <section>
-          <div className="mb-4 flex flex-col justify-between gap-3 sm:flex-row sm:items-end">
-            <div><h2 className="text-lg font-semibold tracking-tight">Distribuições</h2><p className="text-sm text-muted-foreground">Compare os registros por dimensão</p></div>
-            <div className="flex max-w-full overflow-x-auto border-b border-border">
+        <section className="min-w-0" aria-labelledby="distributions-heading">
+          <div className="mb-4 flex flex-col justify-between gap-3 2xl:flex-row 2xl:items-end">
+            <div><h2 id="distributions-heading" className="text-lg font-semibold tracking-tight">Distribuições</h2><p className="text-sm text-muted-foreground">Compare os registros por dimensão</p></div>
+            <div role="tablist" aria-label="Dimensão da distribuição" className="flex min-w-0 max-w-full overflow-x-auto border-b border-border">
               {enabledDistributions.map((key) => (
-                <button key={key} onClick={() => setDistributionKey(key)} className={cn("whitespace-nowrap border-b-2 px-4 py-2 text-sm font-medium transition-colors", visibleDistribution === key ? "border-primary text-primary" : "border-transparent text-muted-foreground hover:text-foreground")}>
+                <button key={key} id={`distribution-tab-${key}`} role="tab" aria-selected={visibleDistribution === key} aria-controls="distribution-panel" tabIndex={visibleDistribution === key ? 0 : -1} onKeyDown={(event) => {
+                  const index = enabledDistributions.indexOf(key);
+                  const next = event.key === "ArrowRight" ? (index + 1) % enabledDistributions.length : event.key === "ArrowLeft" ? (index - 1 + enabledDistributions.length) % enabledDistributions.length : event.key === "Home" ? 0 : event.key === "End" ? enabledDistributions.length - 1 : -1;
+                  if (next < 0) return;
+                  event.preventDefault();
+                  setDistributionKey(enabledDistributions[next]);
+                  document.getElementById(`distribution-tab-${enabledDistributions[next]}`)?.focus();
+                }} onClick={() => setDistributionKey(key)} className={cn("whitespace-nowrap border-b-2 px-4 py-2 text-sm font-medium transition-colors", visibleDistribution === key ? "border-primary text-primary" : "border-transparent text-muted-foreground hover:text-foreground")}>
                   {distributionLabels[key]}
                 </button>
               ))}
             </div>
           </div>
-          <Card className="p-5 shadow-none">
-            {loading ? <Skeleton className="h-64 w-full" /> : barChartFor[visibleDistribution].length === 0 ? <EmptyState text="Nenhum dado disponível" /> : <DistributionList data={barChartFor[visibleDistribution]} />}
+          <Card id="distribution-panel" role="tabpanel" aria-labelledby={`distribution-tab-${visibleDistribution}`} className="min-w-0 rounded-2xl p-4 sm:p-6">
+            {loading ? <Skeleton className="h-[350px] w-full md:h-[400px] lg:h-[480px]" /> : distributionData[visibleDistribution].length === 0 ? <EmptyState text="Nenhum dado disponível" /> : <DistributionChart key={visibleDistribution} data={distributionData[visibleDistribution]} totalRecords={filtered.length} label={distributionLabels[visibleDistribution]} />}
           </Card>
         </section>
       )}

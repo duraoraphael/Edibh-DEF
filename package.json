@@ -12,6 +12,7 @@
     "test": "npm run test:auth && npm run test:email && npm run test:record-number && npm run test:security && npm run test:attachment-url && npm run test:email-template-xss && npm run test:upload && npm run test:rules && playwright test",
     "test:email": "node --experimental-strip-types --import ./tests/support/register.mjs --test tests/email-inline.test.ts",
     "test:record-number": "node --experimental-strip-types --import ./tests/support/register.mjs --test tests/record-number.test.ts",
+    "test:records": "npm run build && node --experimental-strip-types --import ./tests/support/register.mjs --test tests/record-data-source.test.ts && firebase emulators:exec --only auth,firestore,storage --project demo-upload-fix \"node --experimental-strip-types --experimental-test-module-mocks --import ./tests/support/register.mjs --test --test-concurrency=1 tests/firestore-rules.test.ts tests/record-upload.integration.test.ts && playwright test --config tests/records.playwright.config.ts\"",
     "test:security": "node --experimental-strip-types --import ./tests/support/register.mjs --test tests/security.test.ts",
     "test:attachment-url": "node --experimental-strip-types --import ./tests/support/register.mjs --test tests/attachment-url.test.ts",
     "test:email-template-xss": "node --experimental-strip-types --import ./tests/support/register.mjs --test tests/email-template-xss.test.ts",

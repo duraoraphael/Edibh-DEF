@@ -1,8 +1,9 @@
 import { doc, getDoc, getDocs, query, runTransaction, setDoc, where, writeBatch } from "firebase/firestore";
-import { db } from "@/lib/firebase";
+import { auth, db } from "@/lib/firebase";
+import { canEditRecord } from "@/lib/access-policy";
 import { recordsCol, buildAuditLogData, logsCol, type AuditActor } from "@/lib/firestore-helpers";
 import { CONNECTION_MESSAGE } from "@/lib/upload-policy";
-import type { AppRecord, FormField, FormFieldType, RecordStatus, UserRole } from "@/types";
+import type { AppRecord, FormField, FormFieldType, RecordStatus, User, UserRole } from "@/types";
 export { compareRecordNumbers } from "@/lib/record-number";
 
 export const statusLabels: Record<RecordStatus, string> = {
@@ -40,6 +41,61 @@ export function fieldValue(r: AppRecord, key: string): string {
   if (v === undefined || v === null || v === "") return "";
   if (Array.isArray(v)) return v.join(", ");
   return String(v);
+}
+function calendarDateKey(value: unknown): string {
+  if (value instanceof Date && !Number.isNaN(value.getTime())) {
+    return `${value.getFullYear()}-${String(value.getMonth() + 1).padStart(2, "0")}-${String(value.getDate()).padStart(2, "0")}`;
+  }
+  if (value && typeof value === "object" && "toDate" in value && typeof value.toDate === "function") {
+    return calendarDateKey(value.toDate());
+  }
+  if (typeof value !== "string" || !value.trim()) return "";
+
+  const text = value.trim();
+  const isoMatch = /^(\d{4})-(\d{2})-(\d{2})(?:$|T)/.exec(text);
+  const brMatch = /^(\d{2})\/(\d{2})\/(\d{4})$/.exec(text);
+  const match = isoMatch || brMatch;
+  if (match) {
+    const year = Number(isoMatch ? match[1] : match[3]);
+    const month = Number(match[2]);
+    const day = Number(isoMatch ? match[3] : match[1]);
+    const maxDay = new Date(Date.UTC(year, month, 0)).getUTCDate();
+    if (month < 1 || month > 12 || day < 1 || day > maxDay) return "";
+    return `${String(year).padStart(4, "0")}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+  }
+
+  const parsed = new Date(text);
+  return Number.isNaN(parsed.getTime()) ? "" : calendarDateKey(parsed);
+}
+
+/** Uses the date-type field from the saved form; createdAt is legacy fallback only. */
+export function recordDateKey(record: AppRecord, fields: FormField[]): string {
+  const dateFields = fields.filter((field) => field.type === "data").sort((a, b) => a.order - b.order);
+  for (const field of dateFields) {
+    const value = record.data?.[field.key];
+    const key = calendarDateKey(value);
+    if (key) return key;
+  }
+  return calendarDateKey(record.createdAt);
+}
+
+export function formatRecordDate(record: AppRecord, fields: FormField[]): string {
+  return formatCalendarDate(recordDateKey(record, fields));
+}
+
+export function formatCalendarDate(value: unknown): string {
+  const key = calendarDateKey(value);
+  if (!key) return "—";
+  const [year, month, day] = key.split("-");
+  return `${day}/${month}/${year}`;
+}
+
+/** Excel receives a local-noon Date so date-only values do not shift across time zones. */
+export function recordDateForExcel(record: AppRecord, fields: FormField[]): Date | null {
+  const key = recordDateKey(record, fields);
+  if (!key) return null;
+  const [year, month, day] = key.split("-").map(Number);
+  return new Date(year, month - 1, day, 12);
 }
 
 export const DEFAULT_FORM_ID = "default";
@@ -388,24 +444,34 @@ export async function saveRecordWithFixedNumber(
   buildApprovalPayload: (recordNumber: string) => Record<string, unknown>,
   actor: AuditActor
 ): Promise<void> {
+  const uid = auth.currentUser?.uid;
+  if (!uid || uid !== actor.uid) throw Object.assign(new Error("Sessão inválida para editar o registro."), { code: "permission-denied" });
   const recordRef = doc(db, "records", draftId);
   const approvalRef = doc(db, "approvals", draftId);
   await runTransaction(db, async (tx) => {
     const current = await tx.get(recordRef);
     const approval = await tx.get(approvalRef);
+    const profile = (await tx.get(doc(db, "users", uid))).data() as User | undefined;
     if (!current.exists()) throw new Error("Registro não encontrado. Recarregue a página.");
+    if (!canEditRecord(profile ?? null, uid, current.data() as AppRecord)) {
+      throw Object.assign(new Error("Você não tem permissão para editar este registro."), { code: "permission-denied" });
+    }
+    if (profile?.role !== "admin" && current.data().recordNumber !== recordNumber) {
+      throw Object.assign(new Error("A numeração original deve ser preservada."), { code: "permission-denied" });
+    }
+    const managesApprovals = profile?.role === "admin" || profile?.role === "gerente";
     const before = current.data().status;
     const resubmitting = before === "reajuste" || before === "rascunho";
     const status = resubmitting ? "pendente" : before;
-    tx.set(recordRef, sanitizeForFirestore({ ...buildRecordPayload(recordNumber), status,
+    tx.set(recordRef, sanitizeForFirestore({ ...buildRecordPayload(recordNumber), recordNumber, status,
       authorId: current.data().authorId, authorName: current.data().authorName,
       createdAt: current.data().createdAt,
     }), { merge: true });
     // Editing an already-pending flow is not a new approval request. Rewriting
     // approvals here is forbidden for technicians and erased reviewer history.
-    if (resubmitting || !approval.exists()) {
+    if (resubmitting || (!approval.exists() && managesApprovals)) {
       tx.set(approvalRef, sanitizeForFirestore(buildApprovalPayload(recordNumber)));
-    } else if (approval.data().recordNumber !== recordNumber) {
+    } else if (approval.exists() && managesApprovals && approval.data().recordNumber !== recordNumber) {
       tx.update(approvalRef, { recordNumber });
     }
     tx.set(doc(logsCol()), buildAuditLogData(actor, {

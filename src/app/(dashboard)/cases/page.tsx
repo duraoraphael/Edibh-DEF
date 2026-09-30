@@ -7,9 +7,10 @@ import { BriefcaseBusiness, CalendarDays, Database } from "lucide-react";
 import { toast } from "sonner";
 import { db } from "@/lib/firebase";
 import { recordsCol, setRecordCase } from "@/lib/firestore-helpers";
-import { DEFAULT_FORM_ID, fieldValue, getFirebaseErrorMessage, logFirestoreError } from "@/lib/forms";
+import { canEditRecord } from "@/lib/access-policy";
+import { DEFAULT_FORM_ID, fieldValue, formatRecordDate, getFirebaseErrorMessage, logFirestoreError } from "@/lib/forms";
 import { useAuth } from "@/lib/auth-context";
-import type { AppRecord, FormDefinition } from "@/types";
+import type { AppRecord, FormDefinition, FormField } from "@/types";
 import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
 import { CaseCheckbox } from "@/components/records/case-checkbox";
@@ -46,16 +47,20 @@ export default function CasesPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [updatingIds, setUpdatingIds] = useState<Set<string>>(new Set());
-  const [dataSourceFieldKey, setDataSourceFieldKey] = useState<string | null>(null);
+  const [formFields, setFormFields] = useState<FormField[]>([]);
 
   useEffect(() => {
     return onSnapshot(doc(db, "formFields", DEFAULT_FORM_ID), (snapshot) => {
-      if (!snapshot.exists()) return setDataSourceFieldKey(null);
+      if (!snapshot.exists()) {
+        setFormFields([]);
+        return;
+      }
       const form = snapshot.data() as FormDefinition;
-      const field = form.fields.find((item) => normalizeFieldName(item.label) === "fonte_de_dados");
-      setDataSourceFieldKey(field?.key ?? null);
+      setFormFields(form.fields || []);
     });
   }, []);
+
+  const dataSourceFieldKey = formFields.find((item) => normalizeFieldName(item.label) === "fonte_de_dados")?.key;
 
   useEffect(() => {
     const unsubscribe = onSnapshot(
@@ -79,8 +84,7 @@ export default function CasesPage() {
   }, []);
 
   function canChange(record: AppRecord): boolean {
-    if (profile?.role === "admin" || profile?.role === "gerente") return true;
-    return profile?.role === "tecnico" && record.authorId === user?.uid;
+    return canEditRecord(profile, user?.uid, record);
   }
 
   async function unmarkCase(record: AppRecord) {
@@ -144,12 +148,14 @@ export default function CasesPage() {
               </div>
               <div className="flex flex-wrap gap-2 text-xs text-muted-foreground">
                 <Badge variant="secondary">{record.authorName || "Sem responsável"}</Badge>
-                <span className="flex items-center gap-1"><CalendarDays className="h-3.5 w-3.5" />{record.createdAt ? new Date(record.createdAt).toLocaleDateString("pt-BR") : "Sem data"}</span>
+                <span className="flex items-center gap-1"><CalendarDays className="h-3.5 w-3.5" />{formatRecordDate(record, formFields)}</span>
                 {record.updatedAt && <span>Atualizado: {new Date(record.updatedAt).toLocaleDateString("pt-BR")}</span>}
               </div>
               <DataSourceInfo value={dataSourceFieldKey ? fieldValue(record, dataSourceFieldKey) : undefined} />
               <div onClick={(event) => event.stopPropagation()}>
-                <CaseCheckbox checked disabled={!canChange(record) || updatingIds.has(record.id)} recordLabel={record.recordNumber || record.id} onCheckedChange={(checked) => { if (!checked) unmarkCase(record); }} />
+                {canChange(record) ? (
+                  <CaseCheckbox checked disabled={updatingIds.has(record.id)} recordLabel={record.recordNumber || record.id} onCheckedChange={(checked) => { if (!checked) unmarkCase(record); }} />
+                ) : <span>CASE</span>}
               </div>
             </Card>
           ))}

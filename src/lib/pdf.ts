@@ -1,7 +1,7 @@
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
 import type { AppRecord, AttachmentRef, FormField } from "@/types";
-import { statusLabels } from "./forms";
+import { formatCalendarDate, statusLabels } from "./forms";
 
 const GREEN: [number, number, number] = [14, 122, 75];
 const GREEN_DARK: [number, number, number] = [12, 105, 64];
@@ -157,7 +157,7 @@ export async function generateRecordPdf(record: AppRecord, options: GenerateOpti
   y = sectionTitle(doc, "Dados Gerais", y);
   const generalRows: [string, string][] = [
     ["Responsável", record.authorName || "—"],
-    ...generalFields.map((f): [string, string] => [f.label, fieldValue(record, f.key)]),
+    ...generalFields.map((f): [string, string] => [f.label, f.type === "data" ? formatCalendarDate(record.data?.[f.key]) : fieldValue(record, f.key)]),
   ];
   autoTable(doc, {
     startY: y,

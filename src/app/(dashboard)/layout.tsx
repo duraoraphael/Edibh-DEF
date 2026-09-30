@@ -95,7 +95,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
     <SearchProvider>
       <div className="flex min-h-screen w-full bg-background">
         <Sidebar />
-        <div className="flex min-h-screen flex-1 flex-col">
+        <div className="flex min-h-screen min-w-0 flex-1 flex-col">
           <Topbar />
           <main className="flex-1 p-4 md:p-10">
             <div className="mx-auto w-full max-w-350">{children}</div>

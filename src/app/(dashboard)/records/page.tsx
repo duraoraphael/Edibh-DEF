@@ -37,15 +37,20 @@ import {
   X as XIcon,
 } from "lucide-react";
 import { exportRecordsToExcel } from "@/lib/excel-export";
+import { canEditRecord } from "@/lib/access-policy";
+import { formatRecordDataSource, isDataSourceField } from "@/lib/data-source";
 import { db } from "@/lib/firebase";
 import { buildAuditLogData, logsCol, recordsCol, setRecordCase, usersCol, writeAuditLog } from "@/lib/firestore-helpers";
 import { useAuth } from "@/lib/auth-context";
 import {
   DEFAULT_FORM_ID,
   fieldValue,
+  formatCalendarDate,
+  formatRecordDate,
   getFirebaseErrorMessage,
   logFirestoreError,
   compareRecordNumbers,
+  recordDateKey,
   statusLabels,
 } from "@/lib/forms";
 import { ExcelImportDialog } from "@/components/records/excel-import-dialog";
@@ -88,7 +93,7 @@ type SortKey =
   | "recordNumber"
   | "authorName"
   | "status"
-  | "createdAt"
+  | "flowDate"
   | "instalacao"
   | "sistema"
   | "equipamento"
@@ -173,9 +178,7 @@ export default function RecordsHistoryPage() {
         const nextRecords = snap.docs.map((d) => d.data());
         setRecords(nextRecords);
         if (requestedRecordId) {
-          setSelected((current) => current?.id === requestedRecordId
-            ? current
-            : nextRecords.find((record) => record.id === requestedRecordId && !record.deletedAt) || null);
+          setSelected(nextRecords.find((record) => record.id === requestedRecordId && !record.deletedAt) || null);
         } else {
           setSelected(null);
         }
@@ -494,11 +497,16 @@ export default function RecordsHistoryPage() {
     if (instalacaoFilter !== ALL) list = list.filter((r) => fieldValue(r, "instalacao") === instalacaoFilter);
     if (sistemaFilter !== ALL) list = list.filter((r) => fieldValue(r, "sistema") === sistemaFilter);
     if (equipamentoFilter !== ALL) list = list.filter((r) => fieldValue(r, "equipamento") === equipamentoFilter);
-    if (dateFrom) list = list.filter((r) => r.createdAt && r.createdAt >= dateFrom);
-    if (dateTo) list = list.filter((r) => r.createdAt && r.createdAt <= dateTo + "T23:59:59");
+    if (dateFrom || dateTo) {
+      list = list.filter((r) => {
+        const date = recordDateKey(r, formFields);
+        return !!date && (!dateFrom || date >= dateFrom) && (!dateTo || date <= dateTo);
+      });
+    }
 
     const fieldKeys: SortKey[] = ["instalacao", "sistema", "equipamento", "gerencia"];
     const sortValue = (r: AppRecord): string => {
+      if (sortKey === "flowDate") return recordDateKey(r, formFields);
       if (fieldKeys.includes(sortKey)) return fieldValue(r, sortKey);
       return (r as unknown as Record<string, string>)[sortKey] || "";
     };
@@ -523,6 +531,7 @@ export default function RecordsHistoryPage() {
     dateTo,
     sortKey,
     sortDir,
+    formFields,
   ]);
 
   const totalPages = Math.max(1, Math.ceil(filtered.length / pageSize));
@@ -547,7 +556,7 @@ export default function RecordsHistoryPage() {
       Sistema: fieldValue(r, "sistema") || "—",
       Equipamento: fieldValue(r, "equipamento") || "—",
       Gerência: fieldValue(r, "gerencia") || "—",
-      Data: r.createdAt ? new Date(r.createdAt).toLocaleDateString("pt-BR") : "—",
+      Data: formatRecordDate(r, formFields),
       Status: statusLabels[r.status],
       Responsável: r.authorName || "—",
     };
@@ -555,7 +564,7 @@ export default function RecordsHistoryPage() {
 
   async function exportExcel() {
     try {
-      await exportRecordsToExcel({ records: filtered, userName: profile?.name || user?.email || "—" });
+      await exportRecordsToExcel({ records: filtered, formFields, userName: profile?.name || user?.email || "—" });
     } catch (error) {
       console.error("[RecordsHistoryPage:exportExcel] falha ao gerar Excel", error);
       toast.error("Erro ao gerar o Excel. Veja o console para detalhes.");
@@ -756,26 +765,11 @@ export default function RecordsHistoryPage() {
   }
 
   function canEdit(r: AppRecord) {
-    if (!profile) return false;
-    if (profile.role === "admin" || profile.role === "gerente") return true;
-    return profile.role === "tecnico" && r.authorId === user?.uid;
-  }
-
-  // The Firestore rules only let a tecnico move their own record from
-  // "rascunho" or "reajuste" back to "pendente" — every other status is
-  // reserved for admin/gerente decisions. Opening the edit/resubmit form for
-  // an already pendente/aprovado/rejeitado record would just fail on submit
-  // with permission-denied, so the menu item is hidden instead.
-  function canResubmit(r: AppRecord) {
-    if (!canEdit(r)) return false;
-    if (profile?.role !== "tecnico") return true;
-    return r.status === "rascunho" || r.status === "reajuste";
+    return canEditRecord(profile, user?.uid, r);
   }
 
   function canToggleCase(r: AppRecord) {
-    if (!profile) return false;
-    if (profile.role === "admin" || profile.role === "gerente") return true;
-    return profile.role === "tecnico" && r.authorId === user?.uid;
+    return canEditRecord(profile, user?.uid, r);
   }
 
   function canChangeStatus() {
@@ -1018,8 +1012,8 @@ export default function RecordsHistoryPage() {
                   </button>
                 </TableHead>
                 <TableHead>
-                  <button className="flex items-center gap-1" onClick={() => toggleSort("createdAt")}>
-                    Data {renderSortIcon("createdAt")}
+                  <button className="flex items-center gap-1" onClick={() => toggleSort("flowDate")}>
+                    Data {renderSortIcon("flowDate")}
                   </button>
                 </TableHead>
                 <TableHead>
@@ -1032,6 +1026,7 @@ export default function RecordsHistoryPage() {
                     Responsável {renderSortIcon("authorName")}
                   </button>
                 </TableHead>
+                <TableHead>Fonte de Dados</TableHead>
                 <TableHead>Case</TableHead>
                 <TableHead className="text-center">Ações</TableHead>
               </TableRow>
@@ -1041,19 +1036,21 @@ export default function RecordsHistoryPage() {
                 <RecordRow
                   key={r.id}
                   record={r}
+                  dataSource={formatRecordDataSource(r, formFields)}
+                  flowDate={formatRecordDate(r, formFields)}
                   dense={dense}
                   onClick={() => openDetails(r)}
                   selectable={(view === "ativos" && canDelete()) || (view === "removidos" && canPermanentDelete())}
                   selected={selectedIds.has(r.id)}
                   onToggleSelected={() => toggleSelected(r.id)}
-                  caseControl={
+                  caseControl={canToggleCase(r) ? (
                     <CaseCheckbox
                       checked={r.isCase === true}
-                      disabled={view !== "ativos" || !canToggleCase(r) || updatingCaseIds.has(r.id)}
+                      disabled={view !== "ativos" || updatingCaseIds.has(r.id)}
                       recordLabel={r.recordNumber || r.id}
                       onCheckedChange={(checked) => updateCase(r, checked)}
                     />
-                  }
+                  ) : r.isCase ? <span>CASE</span> : <span>—</span>}
                   actions={
                     <DropdownMenu>
                       <DropdownMenuTrigger asChild>
@@ -1066,7 +1063,7 @@ export default function RecordsHistoryPage() {
                           <Eye className="h-4 w-4" />
                           Visualizar
                         </DropdownMenuItem>
-                        {view === "ativos" && canResubmit(r) && (
+                        {view === "ativos" && canEdit(r) && (
                           <DropdownMenuItem onClick={() => router.push(`/records/new?id=${r.id}`)}>
                             <Pencil className="h-4 w-4" />
                             Editar
@@ -1136,6 +1133,11 @@ export default function RecordsHistoryPage() {
               <DialogHeader className="border-b border-border px-6 py-4">
                 <DialogTitle className="flex flex-wrap items-center gap-3">
                   {selected.recordNumber || selected.id}
+                  {!selected.deletedAt && canEdit(selected) && (
+                    <Button size="sm" variant="outline" onClick={() => router.push(`/records/new?id=${selected.id}`)}>
+                      <Pencil className="h-4 w-4" />Editar
+                    </Button>
+                  )}
                   {canChangeStatus() ? (
                     <Select
                       value={selected.status}
@@ -1191,11 +1193,17 @@ export default function RecordsHistoryPage() {
                   <div>
                     <h3 className="mb-2 text-sm font-semibold">Campos preenchidos</h3>
                     <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                      {Object.entries(selected.data || {}).map(([key, value]) => (
+                      <div className="min-w-0 overflow-hidden rounded-lg border border-border p-3">
+                        <p className="text-xs font-medium text-muted-foreground">Fonte de Dados</p>
+                        <p className="whitespace-pre-wrap break-words [overflow-wrap:anywhere] text-sm">{formatRecordDataSource(selected, formFields)}</p>
+                      </div>
+                      {Object.entries(selected.data || {}).filter(([key]) => !isDataSourceField(key, formFields)).map(([key, value]) => (
                         <div key={key} className="min-w-0 overflow-hidden rounded-lg border border-border p-3">
                           <p className="text-xs font-medium text-muted-foreground">{key}</p>
                           <p className="whitespace-pre-wrap break-words [overflow-wrap:anywhere] text-sm">
-                            {Array.isArray(value) ? value.join(", ") : String(value ?? "—")}
+                            {formFields.some((field) => field.key === key && field.type === "data")
+                              ? formatCalendarDate(value)
+                              : Array.isArray(value) ? value.join(", ") : String(value ?? "—")}
                           </p>
                         </div>
                       ))}

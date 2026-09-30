@@ -19,7 +19,7 @@ import {
   saveRecordWithFixedNumber,
   sanitizeForFirestore,
 } from "@/lib/forms";
-import { canSubmitRecord } from "@/lib/access-policy";
+import { canEditRecord, canSubmitRecord } from "@/lib/access-policy";
 import { createNotifications, getUserIdsByRoles } from "@/lib/firestore-helpers";
 import { isAllowedAttachmentUrl } from "@/lib/security/url";
 import { Card } from "@/components/ui/card";
@@ -207,6 +207,10 @@ export default function NewRecordPage() {
 
   const persistDraft = useCallback(
     async (nextValues: Record<string, unknown>, atts: AttachmentRef[]) => {
+      if (!user || !canSubmitRecord(profile)) throw new Error("Sua conta não está autorizada a salvar registros.");
+      if (editId && !canEditRecord(profile, user.uid, { authorId: existingAuthorId ?? "" })) {
+        throw new Error("Você não tem permissão para editar este registro.");
+      }
       window.localStorage.setItem(
         `edibh_draft_${draftId}`,
         JSON.stringify({ values: nextValues, attachments: atts })
@@ -231,6 +235,10 @@ export default function NewRecordPage() {
         const operation = draftOperation.current.catch(() => {}).then(() => runTransaction(db, async tx => {
           const recordRef = doc(db, "records", draftId);
           const current = await tx.get(recordRef);
+          if (editId && !current.exists()) throw new Error("Registro não encontrado. Recarregue a página.");
+          if (current.exists() && !canEditRecord(profile, user.uid, current.data() as AppRecord)) {
+            throw Object.assign(new Error("Você não tem permissão para editar este registro."), { code: "permission-denied" });
+          }
           // Never let a delayed autosave undo a submission or change ownership.
           const stored = current.data();
           if (stored?.recordNumber && !editId) {
@@ -482,6 +490,9 @@ export default function NewRecordPage() {
     if (!canSubmitRecord(profile)) {
       toast.error("Sua conta não está autorizada a enviar registros."); return;
     }
+    if (editId && !canEditRecord(profile, user.uid, { authorId: existingAuthorId ?? "" })) {
+      toast.error("Você não tem permissão para editar este registro."); return;
+    }
     submitLock.current = true;
     if (debounceRef.current) clearTimeout(debounceRef.current);
     setSubmitting(true);
@@ -603,6 +614,11 @@ export default function NewRecordPage() {
     <Button variant="outline" onClick={() => window.location.reload()}>Recarregar</Button>
   </Card>;
 
+  if (editId && (!existingAuthorId || !canEditRecord(profile, user?.uid, { authorId: existingAuthorId }))) return <Card className="p-6">
+    <p>{existingAuthorId ? "Você não tem permissão para editar este fluxo." : "Fluxo não encontrado."}</p>
+    <Button variant="outline" onClick={() => router.push("/records")}>Voltar ao Histórico</Button>
+  </Card>;
+
   if (!editId && existingAuthorId && existingAuthorId !== user?.uid) return <Card className="p-6">
     <p>Este navegador guardou um rascunho de outra conta. Inicie um novo fluxo para continuar com seu usuário.</p>
     <Button onClick={() => {
@@ -614,7 +630,7 @@ export default function NewRecordPage() {
   return (
     <div className="mx-auto flex max-w-3xl flex-col gap-6">
       <div>
-        <h1 className="text-2xl font-semibold tracking-tight text-foreground">Novo Fluxo de Equipamentos Críticos</h1>
+        <h1 className="text-2xl font-semibold tracking-tight text-foreground">{editId ? `Editar Fluxo ${existingRecordNumber || ""}` : "Novo Fluxo de Equipamentos Críticos"}</h1>
         <p className="text-sm text-muted-foreground">
           {activeForm ? `Formulário: ${activeForm.name}` : "Preencha as seções abaixo para criar um novo registro"}
         </p>

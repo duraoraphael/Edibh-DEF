@@ -14,6 +14,8 @@ export function RecordRow({
   actions,
   dense,
   caseControl,
+  dataSource,
+  flowDate,
 }: {
   record: AppRecord;
   onClick?: () => void;
@@ -23,6 +25,8 @@ export function RecordRow({
   actions?: React.ReactNode;
   dense?: boolean;
   caseControl?: React.ReactNode;
+  dataSource: string;
+  flowDate: string;
 }) {
   const cell = dense ? "py-2" : "py-4";
   return (
@@ -44,13 +48,12 @@ export function RecordRow({
       <TableCell className={cell}>{fieldValue(record, "sistema") || "—"}</TableCell>
       <TableCell className={`min-w-64 whitespace-normal leading-relaxed ${cell}`}>{fieldValue(record, "equipamento") || "—"}</TableCell>
       <TableCell className={cell}>{fieldValue(record, "gerencia") || "—"}</TableCell>
-      <TableCell className={cell}>
-        {record.createdAt ? new Date(record.createdAt).toLocaleDateString("pt-BR") : "—"}
-      </TableCell>
+      <TableCell className={cell}>{flowDate}</TableCell>
       <TableCell className={cell}>
         <StatusBadge status={record.status} />
       </TableCell>
       <TableCell className={cell}>{record.authorName || "—"}</TableCell>
+      <TableCell className={`min-w-40 max-w-64 whitespace-normal break-words ${cell}`}>{dataSource}</TableCell>
       {caseControl && (
         <TableCell className={cell} onClick={(e) => e.stopPropagation()}>
           {caseControl}

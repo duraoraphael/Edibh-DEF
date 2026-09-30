@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { before, after, test, mock } from "node:test";
 import { initializeTestEnvironment, type RulesTestEnvironment } from "@firebase/rules-unit-testing";
-import { collection, doc, getDocs, getDocFromServer, setDoc, runTransaction } from "firebase/firestore";
+import { collection, doc, getDocs, getDocFromServer, setDoc, runTransaction, updateDoc } from "firebase/firestore";
 import { getBytes, ref } from "firebase/storage";
 
 let env: RulesTestEnvironment;
@@ -106,6 +106,77 @@ test("technician edits an approved own record without resetting its approval", a
   await save("edit-approved", number, record, approval, actor);
   assert.equal((await getDocFromServer(doc(db, "records", "edit-approved"))).data()?.status, "aprovado");
   assert.equal((await getDocFromServer(doc(db, "approvals", "edit-approved"))).data()?.reviewerId, "admin");
+});
+
+test("edits persist after a server reload without changing ID, number, author, date or record count", async () => {
+  for (const status of ["pendente", "aprovado", "rejeitado", "concluido", "concluido_direto", "reajuste"] as const) {
+    const id = `edit-status-${status}`;
+    const number = await create(id, record, approval, actor);
+    await env.withSecurityRulesDisabled(async context => {
+      await setDoc(doc(context.firestore(), "records", id), { status }, { merge: true });
+      await setDoc(doc(context.firestore(), "approvals", id), { status, reviewerId: "admin" }, { merge: true });
+    });
+    const before = (await getDocFromServer(doc(db, "records", id))).data()!;
+    const count = (await getDocs(collection(db, "records"))).size;
+    await save(id, number, n => ({ ...record(n), data: { equipamento: "Atualizado", tipos_de_dados_9: "IOT" } }), approval, actor);
+    const after = await getDocFromServer(doc(db, "records", id));
+    assert.equal(after.id, id);
+    assert.equal(after.data()?.recordNumber, number);
+    assert.equal(after.data()?.authorId, before.authorId);
+    assert.equal(after.data()?.createdAt, before.createdAt);
+    assert.equal(after.data()?.status, status === "reajuste" ? "pendente" : status);
+    assert.equal(after.data()?.data.equipamento, "Atualizado");
+    assert.equal((await getDocs(collection(db, "records"))).size, count);
+  }
+});
+
+test("foreign edits, owner spoofing and number changes fail through both save service and direct SDK", async () => {
+  const number = await create("ownership-check", record, approval, actor);
+  await env.withSecurityRulesDisabled(async context => {
+    await setDoc(doc(context.firestore(), "records", "foreign-record"), { ...record("999/2026"), authorId: "other", authorName: "Test" });
+  });
+  await assert.rejects(save("foreign-record", "999/2026", record, approval, actor), { code: "permission-denied" });
+  await assert.rejects(updateDoc(doc(db, "records", "foreign-record"), { authorId: "uploader", data: { equipamento: "hack" } }), { code: "permission-denied" });
+  await assert.rejects(updateDoc(doc(db, "records", "foreign-record"), { data: { equipamento: "hack" } }), { code: "permission-denied" });
+  await assert.rejects(save("ownership-check", "999/2026", record, approval, actor), { code: "permission-denied" });
+  await assert.rejects(updateDoc(doc(db, "records", "ownership-check"), { recordNumber: "999/2026" }), { code: "permission-denied" });
+  assert.equal((await getDocFromServer(doc(db, "records", "ownership-check"))).data()?.recordNumber, number);
+  await assert.rejects(save("missing-edit-id", number, record, approval, actor), /Registro não encontrado/);
+  assert.equal((await getDocFromServer(doc(db, "records", "missing-edit-id"))).exists(), false);
+});
+
+test("legacy own flow without approval can still be edited without inventing an approval", async () => {
+  await env.withSecurityRulesDisabled(async context => {
+    await setDoc(doc(context.firestore(), "records", "legacy-edit"), { ...record("901/2026"), status: "aprovado" });
+  });
+  await save("legacy-edit", "901/2026", n => ({ ...record(n), data: { tipos_de_dados_9: "RDO" } }), approval, actor);
+  assert.equal((await getDocFromServer(doc(db, "records", "legacy-edit"))).data()?.status, "aprovado");
+  assert.equal((await getDocFromServer(doc(db, "approvals", "legacy-edit"))).exists(), false);
+});
+
+test("admin and manager keep editing other authors; a newly inactive technician is blocked", async () => {
+  try {
+    await env.withSecurityRulesDisabled(async context => {
+      await setDoc(doc(context.firestore(), "records", "managed-record"), { ...record("902/2026"), authorId: "other", authorName: "Other" });
+    });
+    for (const role of ["admin", "gerente"] as const) {
+      await env.withSecurityRulesDisabled(async context => {
+        await setDoc(doc(context.firestore(), "users", "uploader"), { name: "Test", role, status: "ativo" });
+      });
+      await save("managed-record", "902/2026", n => ({ ...record(n), data: { editedBy: role } }), n => ({ ...approval(n), authorId: "other" }), { ...actor, role });
+      const current = (await getDocFromServer(doc(db, "records", "managed-record"))).data()!;
+      assert.equal(current.authorId, "other");
+      assert.equal(current.data.editedBy, role);
+    }
+    await env.withSecurityRulesDisabled(async context => {
+      await setDoc(doc(context.firestore(), "users", "uploader"), { name: "Test", role: "tecnico", status: "inativo" });
+    });
+    await assert.rejects(save("legacy-edit", "901/2026", record, approval, actor), { code: "permission-denied" });
+  } finally {
+    await env.withSecurityRulesDisabled(async context => {
+      await setDoc(doc(context.firestore(), "users", "uploader"), { name: "Test", role: "tecnico", status: "ativo" });
+    });
+  }
 });
 
 test("viewer can only access Dashboard and History; unknown roles fail closed", () => {

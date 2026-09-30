@@ -18,10 +18,10 @@ export function CaseCheckbox({
       <Checkbox
         checked={checked}
         disabled={disabled}
-        aria-label={`Case do fluxo ${recordLabel}`}
+        aria-label={checked ? `Remover CASE do fluxo ${recordLabel}` : `Marcar como CASE o fluxo ${recordLabel}`}
         onCheckedChange={(value) => onCheckedChange(value === true)}
       />
-      <span>Case</span>
+      <span>{checked ? "CASE" : "Marcar como CASE"}</span>
     </label>
   );
 }

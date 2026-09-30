@@ -174,6 +174,7 @@ export async function setRecordCase(record: AppRecord, isCase: boolean, actor: A
     recordNumber: record.recordNumber,
     statusBefore: record.status,
     statusAfter: record.status,
+    detail: `CASE: ${record.isCase === true ? "Sim" : "Não"} -> ${isCase ? "Sim" : "Não"}`,
   }));
   await batch.commit();
 }
