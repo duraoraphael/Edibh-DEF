@@ -14,6 +14,8 @@ export function FilterSelect({
   onChange,
   options,
   labels,
+  allLabel = "Todos",
+  includeLabelInAllOption = true,
   className,
   children,
 }: {
@@ -22,6 +24,8 @@ export function FilterSelect({
   onChange: (v: string) => void;
   options?: string[];
   labels?: Record<string, string>;
+  allLabel?: string;
+  includeLabelInAllOption?: boolean;
   className?: string;
   children?: React.ReactNode;
 }) {
@@ -31,7 +35,9 @@ export function FilterSelect({
         <SelectValue placeholder={label} />
       </SelectTrigger>
       <SelectContent>
-        <SelectItem value={FILTER_ALL}>{label}: Todos</SelectItem>
+        <SelectItem value={FILTER_ALL}>
+          {includeLabelInAllOption ? `${label}: ${allLabel}` : allLabel}
+        </SelectItem>
         {options
           ? options.map((o) => (
               <SelectItem key={o} value={o}>

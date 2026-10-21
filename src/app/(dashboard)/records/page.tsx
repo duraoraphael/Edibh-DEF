@@ -21,6 +21,7 @@ import {
   ArrowDown,
   ArrowUp,
   ArrowUpDown,
+  CalendarDays,
   Check,
   ChevronDown,
   Copy,
@@ -38,7 +39,7 @@ import {
 } from "lucide-react";
 import { exportRecordsToExcel } from "@/lib/excel-export";
 import { canEditRecord } from "@/lib/access-policy";
-import { formatRecordDataSource, isDataSourceField } from "@/lib/data-source";
+import { formatRecordDataSource, isDataSourceField, recordDataSources } from "@/lib/data-source";
 import { db } from "@/lib/firebase";
 import { buildAuditLogData, logsCol, recordsCol, setRecordCase, usersCol, writeAuditLog } from "@/lib/firestore-helpers";
 import { useAuth } from "@/lib/auth-context";
@@ -101,12 +102,38 @@ type SortKey =
 
 const DEFAULT_PAGE_SIZE = 20;
 const ALL = "todos";
+const HISTORY_FILTERS_STORAGE_KEY = "records-history-filters-v1";
+const HISTORY_FILTER_SELECT_CLASS = "h-12 rounded-xl border-[#E2E8F0] bg-white px-3.5 text-xs shadow-none [&>span]:line-clamp-2 [&>span]:whitespace-normal [&>span]:text-left";
+
+interface PersistedHistoryFilters {
+  search: string;
+  status: string;
+  responsavel: string;
+  gerencia: string;
+  instalacao: string;
+  sistema: string;
+  equipamento: string;
+  dataSource: string;
+  dateFrom: string;
+  dateTo: string;
+  page: number;
+  pageSize: number;
+}
 
 interface FlowUpdateEntry {
   id: string;
   text: string;
   authorName: string;
   createdAt: Timestamp | null;
+}
+
+function HistoryFilterField({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div className="min-w-0">
+      <span className="mb-2 block text-xs font-semibold tracking-wide text-[#243247]">{label}</span>
+      {children}
+    </div>
+  );
 }
 
 export default function RecordsHistoryPage() {
@@ -123,6 +150,7 @@ export default function RecordsHistoryPage() {
   const [instalacaoFilter, setInstalacaoFilter] = useState<string>(ALL);
   const [sistemaFilter, setSistemaFilter] = useState<string>(ALL);
   const [equipamentoFilter, setEquipamentoFilter] = useState<string>(ALL);
+  const [dataSourceFilter, setDataSourceFilter] = useState<string>(ALL);
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
   const [sortKey, setSortKey] = useState<SortKey>("recordNumber");
@@ -140,6 +168,7 @@ export default function RecordsHistoryPage() {
   const [view, setView] = useState<"ativos" | "removidos">("ativos");
   const [dense, setDense] = useState(false);
   const [filtersOpen, setFiltersOpen] = useState(false);
+  const [filtersRestored, setFiltersRestored] = useState(false);
   const [formFields, setFormFields] = useState<FormField[]>([]);
   const [logs, setLogs] = useState<LogEntry[]>([]);
   const [logsLoadedForId, setLogsLoadedForId] = useState<string | null>(null);
@@ -156,6 +185,89 @@ export default function RecordsHistoryPage() {
   const [updatingResponsible, setUpdatingResponsible] = useState(false);
   const [updatingCaseIds, setUpdatingCaseIds] = useState<Set<string>>(new Set());
   const selectedId = selected?.id;
+
+  useEffect(() => {
+    const restoreTimer = window.setTimeout(() => {
+      try {
+        const stored = sessionStorage.getItem(HISTORY_FILTERS_STORAGE_KEY);
+        if (!stored) return;
+        const filters = JSON.parse(stored) as Partial<PersistedHistoryFilters>;
+        const restoreString = (value: unknown, setter: (next: string) => void) => {
+          if (typeof value === "string") setter(value);
+        };
+        restoreString(filters.search, setSearch);
+        restoreString(filters.status, setStatusFilter);
+        restoreString(filters.responsavel, setResponsavelFilter);
+        restoreString(filters.gerencia, setGerenciaFilter);
+        restoreString(filters.instalacao, setInstalacaoFilter);
+        restoreString(filters.sistema, setSistemaFilter);
+        restoreString(filters.equipamento, setEquipamentoFilter);
+        restoreString(filters.dataSource, setDataSourceFilter);
+        restoreString(filters.dateFrom, setDateFrom);
+        restoreString(filters.dateTo, setDateTo);
+        if (typeof filters.page === "number" && Number.isInteger(filters.page) && filters.page > 0) {
+          setPage(filters.page);
+        }
+        if ([10, 20, 50].includes(filters.pageSize || 0)) {
+          setPageSize(filters.pageSize!);
+        }
+        if (
+          [filters.status, filters.responsavel, filters.gerencia, filters.instalacao, filters.sistema, filters.equipamento, filters.dataSource]
+            .some((value) => typeof value === "string" && value !== ALL) ||
+          Boolean(filters.dateFrom || filters.dateTo)
+        ) {
+          setFiltersOpen(true);
+        }
+      } catch {
+        sessionStorage.removeItem(HISTORY_FILTERS_STORAGE_KEY);
+      } finally {
+        setFiltersRestored(true);
+      }
+    }, 0);
+    return () => window.clearTimeout(restoreTimer);
+  }, []);
+
+  useEffect(() => {
+    if (!filtersRestored) return;
+    const filters: PersistedHistoryFilters = {
+      search,
+      status: statusFilter,
+      responsavel: responsavelFilter,
+      gerencia: gerenciaFilter,
+      instalacao: instalacaoFilter,
+      sistema: sistemaFilter,
+      equipamento: equipamentoFilter,
+      dataSource: dataSourceFilter,
+      dateFrom,
+      dateTo,
+      page,
+      pageSize,
+    };
+    const hasPersistedCriteria = Boolean(
+      search || dateFrom || dateTo || page !== 1 || pageSize !== DEFAULT_PAGE_SIZE ||
+      [statusFilter, responsavelFilter, gerenciaFilter, instalacaoFilter, sistemaFilter, equipamentoFilter, dataSourceFilter]
+        .some((value) => value !== ALL)
+    );
+    if (hasPersistedCriteria) {
+      sessionStorage.setItem(HISTORY_FILTERS_STORAGE_KEY, JSON.stringify(filters));
+    } else {
+      sessionStorage.removeItem(HISTORY_FILTERS_STORAGE_KEY);
+    }
+  }, [
+    filtersRestored,
+    search,
+    statusFilter,
+    responsavelFilter,
+    gerenciaFilter,
+    instalacaoFilter,
+    sistemaFilter,
+    equipamentoFilter,
+    dataSourceFilter,
+    dateFrom,
+    dateTo,
+    page,
+    pageSize,
+  ]);
 
   useEffect(() => {
     const unsub = onSnapshot(doc(db, "formFields", DEFAULT_FORM_ID), (snap) => {
@@ -472,6 +584,11 @@ export default function RecordsHistoryPage() {
   const instalacoes = useMemo(() => distinct("instalacao"), [distinct]);
   const sistemas = useMemo(() => distinct("sistema"), [distinct]);
   const equipamentos = useMemo(() => distinct("equipamento"), [distinct]);
+  const dataSources = useMemo(
+    () => Array.from(new Set(submitted.flatMap((record) => recordDataSources(record, formFields))))
+      .sort((a, b) => a.localeCompare(b, "pt-BR", { sensitivity: "base" })),
+    [submitted, formFields]
+  );
 
   const filtered = useMemo(() => {
     let list = submitted;
@@ -497,6 +614,7 @@ export default function RecordsHistoryPage() {
     if (instalacaoFilter !== ALL) list = list.filter((r) => fieldValue(r, "instalacao") === instalacaoFilter);
     if (sistemaFilter !== ALL) list = list.filter((r) => fieldValue(r, "sistema") === sistemaFilter);
     if (equipamentoFilter !== ALL) list = list.filter((r) => fieldValue(r, "equipamento") === equipamentoFilter);
+    if (dataSourceFilter !== ALL) list = list.filter((r) => recordDataSources(r, formFields).includes(dataSourceFilter));
     if (dateFrom || dateTo) {
       list = list.filter((r) => {
         const date = recordDateKey(r, formFields);
@@ -527,6 +645,7 @@ export default function RecordsHistoryPage() {
     instalacaoFilter,
     sistemaFilter,
     equipamentoFilter,
+    dataSourceFilter,
     dateFrom,
     dateTo,
     sortKey,
@@ -825,6 +944,25 @@ export default function RecordsHistoryPage() {
     };
   }
 
+  function clearFilters() {
+    sessionStorage.removeItem(HISTORY_FILTERS_STORAGE_KEY);
+    setSearch("");
+    setStatusFilter(ALL);
+    setResponsavelFilter(ALL);
+    setGerenciaFilter(ALL);
+    setInstalacaoFilter(ALL);
+    setSistemaFilter(ALL);
+    setEquipamentoFilter(ALL);
+    setDataSourceFilter(ALL);
+    setDateFrom("");
+    setDateTo("");
+    setPage(1);
+  }
+
+  const activeFilterCount = [statusFilter, responsavelFilter, gerenciaFilter, instalacaoFilter, sistemaFilter, equipamentoFilter, dataSourceFilter]
+    .filter((value) => value !== ALL).length + (dateFrom ? 1 : 0) + (dateTo ? 1 : 0);
+  const hasActiveCriteria = Boolean(search || activeFilterCount > 0);
+
   return (
     <div className="flex flex-col gap-6">
       <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-center">
@@ -891,76 +1029,98 @@ export default function RecordsHistoryPage() {
       </div>
 
       <div className="flex flex-col gap-3">
-        <div className="flex flex-col gap-2 md:flex-row">
-        <div className="relative flex-1">
-          <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-          <Input
-            className="h-11 rounded-lg bg-card pl-10 shadow-none"
-            placeholder="Buscar por ID, instalação, sistema, equipamento, gerência, responsável ou status..."
-            value={search}
-            onChange={(e) => resetPage(setSearch)(e.target.value)}
-          />
-        </div>
-        <Button className="h-11 min-w-36 justify-between rounded-lg bg-card shadow-none" variant="outline" onClick={() => setFiltersOpen((open) => !open)} aria-expanded={filtersOpen}>
-          <SlidersHorizontal className="h-4 w-4" />Filtros
-          {[statusFilter, responsavelFilter, gerenciaFilter, instalacaoFilter, sistemaFilter, equipamentoFilter].filter((value) => value !== ALL).length + (dateFrom ? 1 : 0) + (dateTo ? 1 : 0) > 0 && (
-            <span className="rounded bg-primary/10 px-1.5 text-xs text-primary">{[statusFilter, responsavelFilter, gerenciaFilter, instalacaoFilter, sistemaFilter, equipamentoFilter].filter((value) => value !== ALL).length + (dateFrom ? 1 : 0) + (dateTo ? 1 : 0)}</span>
-          )}
-          <ChevronDown className={cn("h-4 w-4 text-muted-foreground transition-transform", filtersOpen && "rotate-180")} />
-        </Button>
+        <div className="flex flex-col gap-3 sm:flex-row">
+          <div className="relative min-w-0 flex-1">
+            <Search className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-[#64748B]" />
+            <Input
+              className="h-12 rounded-xl border-[#E2E8F0] bg-white pl-11 pr-4 shadow-sm placeholder:text-[#64748B] focus-visible:border-primary focus-visible:ring-primary/20"
+              placeholder="Buscar por ID, instalação, sistema, equipamento, gerência, responsável ou status..."
+              aria-label="Buscar no histórico"
+              value={search}
+              onChange={(e) => resetPage(setSearch)(e.target.value)}
+            />
+          </div>
+          <Button
+            className="h-12 min-w-36 justify-between rounded-xl border-primary-100 bg-primary-50 px-4 text-primary-800 shadow-none hover:bg-primary-100"
+            variant="outline"
+            onClick={() => setFiltersOpen((open) => !open)}
+            aria-expanded={filtersOpen}
+            aria-controls="history-filters-panel"
+          >
+            <span className="flex items-center gap-2"><SlidersHorizontal className="h-4 w-4" />Filtros</span>
+            {activeFilterCount > 0 && (
+              <span className="rounded-md border border-primary-100 bg-white px-1.5 py-0.5 text-xs leading-none text-primary-700">{activeFilterCount}</span>
+            )}
+            <ChevronDown className={cn("h-4 w-4 text-primary-700 transition-transform motion-reduce:transition-none", filtersOpen && "rotate-180")} />
+          </Button>
         </div>
 
         {filtersOpen && (
-          <div className="rounded-lg border border-border bg-card p-4">
-          <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-7">
-            <FilterSelect label="Status" value={statusFilter} onChange={resetPage(setStatusFilter)}>
-              {Object.entries(statusLabels).map(([k, v]) => (
-                <SelectItem key={k} value={k}>
-                  {v}
-                </SelectItem>
-              ))}
-            </FilterSelect>
-            <FilterSelect label="Responsável" value={responsavelFilter} onChange={resetPage(setResponsavelFilter)}>
-              {responsaveis.map((v) => (
-                <SelectItem key={v} value={v}>
-                  {v}
-                </SelectItem>
-              ))}
-            </FilterSelect>
-            <FilterSelect label="Gerência" value={gerenciaFilter} onChange={resetPage(setGerenciaFilter)}>
-              {gerencias.map((v) => (
-                <SelectItem key={v} value={v}>
-                  {v}
-                </SelectItem>
-              ))}
-            </FilterSelect>
-            <FilterSelect label="Instalação" value={instalacaoFilter} onChange={resetPage(setInstalacaoFilter)}>
-              {instalacoes.map((v) => (
-                <SelectItem key={v} value={v}>
-                  {v}
-                </SelectItem>
-              ))}
-            </FilterSelect>
-            <FilterSelect label="Sistema" value={sistemaFilter} onChange={resetPage(setSistemaFilter)}>
-              {sistemas.map((v) => (
-                <SelectItem key={v} value={v}>
-                  {v}
-                </SelectItem>
-              ))}
-            </FilterSelect>
-            <FilterSelect label="Equipamento" value={equipamentoFilter} onChange={resetPage(setEquipamentoFilter)}>
-              {equipamentos.map((v) => (
-                <SelectItem key={v} value={v}>
-                  {v}
-                </SelectItem>
-              ))}
-            </FilterSelect>
-            <div className="flex items-center gap-1">
-              <Input type="date" value={dateFrom} onChange={(e) => resetPage(setDateFrom)(e.target.value)} title="Período de" />
-              <Input type="date" value={dateTo} onChange={(e) => resetPage(setDateTo)(e.target.value)} title="Período até" />
+          <section id="history-filters-panel" aria-label="Filtros do histórico" className="rounded-2xl border border-[#E2E8F0] bg-white p-4 shadow-sm sm:p-5">
+            <div className="grid grid-cols-[repeat(auto-fit,minmax(min(100%,10rem),1fr))] gap-x-4 gap-y-4">
+              <HistoryFilterField label="Status">
+                <FilterSelect label="Status" includeLabelInAllOption={false} className={HISTORY_FILTER_SELECT_CLASS} value={statusFilter} onChange={resetPage(setStatusFilter)}>
+                  {Object.entries(statusLabels).map(([k, v]) => (
+                    <SelectItem key={k} value={k}>{v}</SelectItem>
+                  ))}
+                </FilterSelect>
+              </HistoryFilterField>
+              <HistoryFilterField label="Responsável">
+                <FilterSelect label="Responsável" includeLabelInAllOption={false} className={HISTORY_FILTER_SELECT_CLASS} value={responsavelFilter} onChange={resetPage(setResponsavelFilter)}>
+                  {responsaveis.map((v) => <SelectItem key={v} value={v}>{v}</SelectItem>)}
+                </FilterSelect>
+              </HistoryFilterField>
+              <HistoryFilterField label="Gerência">
+                <FilterSelect label="Gerência" includeLabelInAllOption={false} className={HISTORY_FILTER_SELECT_CLASS} value={gerenciaFilter} onChange={resetPage(setGerenciaFilter)}>
+                  {gerencias.map((v) => <SelectItem key={v} value={v}>{v}</SelectItem>)}
+                </FilterSelect>
+              </HistoryFilterField>
+              <HistoryFilterField label="Instalação">
+                <FilterSelect label="Instalação" includeLabelInAllOption={false} className={HISTORY_FILTER_SELECT_CLASS} value={instalacaoFilter} onChange={resetPage(setInstalacaoFilter)}>
+                  {instalacoes.map((v) => <SelectItem key={v} value={v}>{v}</SelectItem>)}
+                </FilterSelect>
+              </HistoryFilterField>
+              <HistoryFilterField label="Sistema">
+                <FilterSelect label="Sistema" includeLabelInAllOption={false} className={HISTORY_FILTER_SELECT_CLASS} value={sistemaFilter} onChange={resetPage(setSistemaFilter)}>
+                  {sistemas.map((v) => <SelectItem key={v} value={v}>{v}</SelectItem>)}
+                </FilterSelect>
+              </HistoryFilterField>
+              <HistoryFilterField label="Equipamento">
+                <FilterSelect label="Equipamento" includeLabelInAllOption={false} className={HISTORY_FILTER_SELECT_CLASS} value={equipamentoFilter} onChange={resetPage(setEquipamentoFilter)}>
+                  {equipamentos.map((v) => <SelectItem key={v} value={v}>{v}</SelectItem>)}
+                </FilterSelect>
+              </HistoryFilterField>
+              <HistoryFilterField label="Fonte de Dados">
+                <FilterSelect label="Fonte de Dados" includeLabelInAllOption={false} className={HISTORY_FILTER_SELECT_CLASS} value={dataSourceFilter} onChange={resetPage(setDataSourceFilter)}>
+                  {dataSources.map((value) => <SelectItem key={value} value={value}>{value}</SelectItem>)}
+                </FilterSelect>
+              </HistoryFilterField>
             </div>
-          </div>
-          </div>
+
+            <div className="mt-5 flex flex-col gap-4 border-t border-[#E2E8F0] pt-5 lg:flex-row lg:items-end lg:justify-between">
+              <div className="min-w-0 flex-1 rounded-xl border border-[#E2E8F0] bg-[#F6F8FA] p-4">
+                <div className="mb-3 flex items-center gap-2 text-sm font-semibold text-[#243247]">
+                  <CalendarDays className="h-4 w-4 text-primary" />
+                  <span>Período</span>
+                </div>
+                <div className="grid grid-cols-1 items-center gap-2 sm:grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] sm:gap-3">
+                  <div className="relative min-w-0">
+                    <CalendarDays className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-[#64748B]" />
+                    <Input id="history-date-from" aria-label="Data inicial do período" lang="pt-BR" type="date" value={dateFrom} onChange={(e) => resetPage(setDateFrom)(e.target.value)} title="Período de" className="h-11 rounded-xl border-[#E2E8F0] bg-white pl-10 shadow-none" />
+                  </div>
+                  <span className="text-center text-sm text-[#64748B]">até</span>
+                  <div className="relative min-w-0">
+                    <CalendarDays className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-[#64748B]" />
+                    <Input id="history-date-to" aria-label="Data final do período" lang="pt-BR" type="date" value={dateTo} onChange={(e) => resetPage(setDateTo)(e.target.value)} title="Período até" className="h-11 rounded-xl border-[#E2E8F0] bg-white pl-10 shadow-none" />
+                  </div>
+                </div>
+              </div>
+              <Button type="button" variant="outline" onClick={clearFilters} disabled={!hasActiveCriteria} className="h-11 w-full rounded-xl border-[#E2E8F0] bg-white px-4 text-[#243247] shadow-none hover:bg-[#F6F8FA] lg:w-auto">
+                <RotateCcw className="h-4 w-4 text-[#64748B]" />
+                Limpar Filtros
+              </Button>
+            </div>
+          </section>
         )}
       </div>
 

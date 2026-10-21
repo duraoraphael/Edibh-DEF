@@ -143,6 +143,59 @@ test("History date filters use the form date and fall back to createdAt only whe
   await expect(legacyRow.getByRole("cell", { name: "30/09/2026", exact: true })).toBeVisible();
 });
 
+test("History combines and persists filters, then clears every criterion", async ({ page }, testInfo) => {
+  await page.goto("/records");
+  await page.getByRole("button", { name: "Filtros" }).click();
+
+  await page.getByRole("combobox", { name: "Fonte de Dados" }).click();
+  await page.getByRole("option", { name: "RDO-INSTALAÇÃO", exact: true }).click();
+  await page.getByRole("combobox", { name: "Status" }).click();
+  await page.getByRole("option", { name: "Aprovado", exact: true }).click();
+  await page.locator('input[title="Período de"]').fill("2026-09-01");
+  await page.locator('input[title="Período até"]').fill("2026-09-10");
+  await page.getByPlaceholder(/Buscar por ID/).fill("Equipamento");
+
+  await expect(page.getByRole("cell", { name: "204/2026", exact: true })).toBeVisible();
+  await expect(page.getByRole("cell", { name: "205/2026", exact: true })).toHaveCount(0);
+  await expect(page.getByRole("cell", { name: "206/2026", exact: true })).toHaveCount(0);
+  await expect.poll(() => page.evaluate(() => sessionStorage.getItem("records-history-filters-v1"))).not.toBeNull();
+
+  await page.getByRole("cell", { name: "204/2026", exact: true }).click();
+  await expect(page.getByRole("dialog")).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(page).toHaveURL(/\/records$/);
+  await expect(page.getByRole("combobox", { name: "Fonte de Dados" })).toContainText("RDO-INSTALAÇÃO");
+
+  await page.reload();
+  await expect(page.getByRole("combobox", { name: "Fonte de Dados" })).toContainText("RDO-INSTALAÇÃO");
+  await expect(page.getByRole("combobox", { name: "Status" })).toContainText("Aprovado");
+  await expect(page.locator('input[title="Período de"]')).toHaveValue("2026-09-01");
+  await expect(page.locator('input[title="Período até"]')).toHaveValue("2026-09-10");
+  await expect(page.getByPlaceholder(/Buscar por ID/)).toHaveValue("Equipamento");
+  await expect(page.getByRole("cell", { name: "204/2026", exact: true })).toBeVisible();
+  await expect(page.getByRole("cell", { name: "205/2026", exact: true })).toHaveCount(0);
+  await expect(page.getByText("Período", { exact: true })).toBeVisible();
+  await page.screenshot({ path: testInfo.outputPath("history-filters-desktop.png"), fullPage: true });
+
+  await page.setViewportSize({ width: 390, height: 844 });
+  await expect(page.getByRole("combobox", { name: "Status" })).toBeVisible();
+  await expect(page.getByRole("combobox", { name: "Fonte de Dados" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Limpar Filtros" })).toBeVisible();
+  await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true);
+  await page.screenshot({ path: testInfo.outputPath("history-filters-mobile.png"), fullPage: true });
+
+  await page.getByRole("button", { name: "Limpar Filtros" }).click();
+  await expect(page.getByRole("combobox", { name: "Fonte de Dados" })).toContainText("Todos");
+  await expect(page.getByRole("combobox", { name: "Status" })).toContainText("Todos");
+  await expect(page.locator('input[title="Período de"]')).toHaveValue("");
+  await expect(page.locator('input[title="Período até"]')).toHaveValue("");
+  await expect(page.getByPlaceholder(/Buscar por ID/)).toHaveValue("");
+  for (const recordNumber of ["204/2026", "205/2026", "206/2026"]) {
+    await expect(page.getByRole("cell", { name: recordNumber, exact: true })).toBeVisible();
+  }
+  await expect.poll(() => page.evaluate(() => sessionStorage.getItem("records-history-filters-v1"))).toBeNull();
+});
+
 test("foreign flow has no Edit action and a forged editor URL is blocked", async ({ page }) => {
   await page.goto("/records");
   const row = page.getByRole("row").filter({ has: page.getByRole("cell", { name: "205/2026", exact: true }) });
