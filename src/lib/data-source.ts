@@ -7,7 +7,6 @@ function normalizedName(value: string) {
 export function normalizeDataSource(value: string): string {
   const name = normalizedName(value);
   if (!name || ["null", "undefined", "naoinformado", "objectobject"].includes(name)) return "";
-  if (name === "rdo" || name === "rdoinstalacao") return "RDO-INSTALAÇÃO";
   if (name === "iot" || name === "supervisorioiot") return "IOT";
   return value.trim();
 }

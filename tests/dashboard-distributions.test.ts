@@ -18,7 +18,7 @@ test("keeps every category, sorts descending and uses the full filtered count", 
 test("reads the six dimensions, including a custom macro field key", () => {
   const records = [record({ gerencia: "G", instalacao: "I", sistema: "S", custom_macro: "M", fonte_de_dados_123: "RDO" })];
   const fields: FormField[] = [sourceField, { ...sourceField, id: "macro", key: "custom_macro", label: "Sistema Macro" }];
-  for (const [key, expected] of [["gerencia", "G"], ["instalacao", "I"], ["sistema", "S"], ["sistemaMacro", "M"], ["responsavel", "Ana"], ["fonteDados", "RDO-INSTALAÇÃO"]] as const) {
+  for (const [key, expected] of [["gerencia", "G"], ["instalacao", "I"], ["sistema", "S"], ["sistemaMacro", "M"], ["responsavel", "Ana"], ["fonteDados", "RDO"]] as const) {
     assert.deepEqual(buildDistributionData(records, key, fields)[0], { name: expected, total: 1, percentage: 100 });
   }
 });
@@ -26,9 +26,9 @@ test("reads the six dimensions, including a custom macro field key", () => {
 test("source aliases merge before counting and cannot double count one record", () => {
   const records = [record({ fonte_de_dados_123: ["SUPERVISORIO-IOT", "SUPERVISÓRIO-IOT", "RDO"] }), record({ fonte_de_dados_123: " supervisório - iot " }), record({})];
   const data = buildDistributionData(records, "fonteDados", [sourceField]);
-  assert.deepEqual(data.map(({ name, total }) => ({ name, total })), [{ name: "IOT", total: 2 }, { name: "RDO-INSTALAÇÃO", total: 1 }, { name: "Manual", total: 0 }]);
+  assert.deepEqual(data.map(({ name, total }) => ({ name, total })), [{ name: "IOT", total: 2 }, { name: "RDO", total: 1 }, { name: "Manual", total: 0 }]);
   assert.equal(data[0].percentage, 2 / 3 * 100);
-  assert.equal(normalizeDistributionSource("rdo instalação"), "RDO-INSTALAÇÃO");
+  assert.equal(normalizeDistributionSource("RDO-INSTALAÇÃO"), "RDO-INSTALAÇÃO");
 });
 
 test("multi-selection percentages use record count, not the sum of selections", () => {

@@ -148,7 +148,7 @@ test("History combines and persists filters, then clears every criterion", async
   await page.getByRole("button", { name: "Filtros" }).click();
 
   await page.getByRole("combobox", { name: "Fonte de Dados" }).click();
-  await page.getByRole("option", { name: "RDO-INSTALAÇÃO", exact: true }).click();
+  await page.getByRole("option", { name: "RDO", exact: true }).click();
   await page.getByRole("combobox", { name: "Status" }).click();
   await page.getByRole("option", { name: "Aprovado", exact: true }).click();
   await page.locator('input[title="Período de"]').fill("2026-09-01");
@@ -164,10 +164,10 @@ test("History combines and persists filters, then clears every criterion", async
   await expect(page.getByRole("dialog")).toBeVisible();
   await page.keyboard.press("Escape");
   await expect(page).toHaveURL(/\/records$/);
-  await expect(page.getByRole("combobox", { name: "Fonte de Dados" })).toContainText("RDO-INSTALAÇÃO");
+  await expect(page.getByRole("combobox", { name: "Fonte de Dados" })).toContainText("RDO");
 
   await page.reload();
-  await expect(page.getByRole("combobox", { name: "Fonte de Dados" })).toContainText("RDO-INSTALAÇÃO");
+  await expect(page.getByRole("combobox", { name: "Fonte de Dados" })).toContainText("RDO");
   await expect(page.getByRole("combobox", { name: "Status" })).toContainText("Aprovado");
   await expect(page.locator('input[title="Período de"]')).toHaveValue("2026-09-01");
   await expect(page.locator('input[title="Período até"]')).toHaveValue("2026-09-10");
@@ -215,7 +215,7 @@ test("foreign flow has no Edit action and a forged editor URL is blocked", async
 test("History and the downloaded Excel share row-specific sources, fallback and existing formatting", async ({ page }, testInfo) => {
   await page.goto("/records");
   await expect(page.getByRole("columnheader", { name: "Fonte de Dados" })).toBeVisible();
-  for (const [id, value] of [["204/2026", "RDO-INSTALAÇÃO"], ["205/2026", "IOT"], ["206/2026", "Não informado"]]) {
+  for (const [id, value] of [["204/2026", "RDO"], ["205/2026", "IOT"], ["206/2026", "Não informado"]]) {
     const row = page.getByRole("row").filter({ has: page.getByRole("cell", { name: id, exact: true }) });
     await expect(row.getByRole("cell", { name: value, exact: true })).toBeVisible();
   }
@@ -231,7 +231,7 @@ test("History and the downloaded Excel share row-specific sources, fallback and 
   await workbook.xlsx.readFile(file);
   const sheet = workbook.getWorksheet("Registros")!;
   expect(sheet.getRow(6).values).toEqual([undefined, "ID", "Instalação", "Sistema", "Equipamento", "Gerência", "Data", "Status", "Responsável", "FONTE DE DADOS"]);
-  expect([7, 8, 9].map(row => [sheet.getCell(row, 1).value, sheet.getCell(row, 9).value])).toEqual([["204/2026", "RDO-INSTALAÇÃO"], ["205/2026", "IOT"], ["206/2026", "Não informado"]]);
+  expect([7, 8, 9].map(row => [sheet.getCell(row, 1).value, sheet.getCell(row, 9).value])).toEqual([["204/2026", "RDO"], ["205/2026", "IOT"], ["206/2026", "Não informado"]]);
   expect(sheet.getCell("I6").fill).toEqual(sheet.getCell("H6").fill);
   expect(sheet.getCell("I7").border).toEqual(sheet.getCell("H7").border);
   expect(sheet.getCell("I7").fill).toEqual(sheet.getCell("H7").fill);

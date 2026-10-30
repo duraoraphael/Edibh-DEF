@@ -60,7 +60,13 @@ import { CaseCheckbox } from "@/components/records/case-checkbox";
 import { AttachmentImage, AttachmentLink, isImageAttachment } from "@/components/ui/attachment-link";
 import { Checkbox } from "@/components/ui/checkbox";
 import { generateRecordPdf, generateRecordsTablePdf } from "@/lib/pdf";
-import type { AppRecord, FormDefinition, FormField, LogEntry, RecordStatus, User } from "@/types";
+import { deleteOwnedAttachment, uploadAttachment } from "@/lib/attachment-upload";
+import {
+  FlowUpdatePhotoGallery,
+  FlowUpdatePhotoPicker,
+  FlowUpdatePhotoViewer,
+} from "@/components/records/flow-update-photos";
+import type { AppRecord, AttachmentRef, FormDefinition, FormField, LogEntry, RecordStatus, User } from "@/types";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -125,6 +131,13 @@ interface FlowUpdateEntry {
   text: string;
   authorName: string;
   createdAt: Timestamp | null;
+  attachments: AttachmentRef[];
+}
+
+type UploadedPhoto = Awaited<ReturnType<typeof uploadAttachment>>;
+
+function flowPhotosLabel(count: number) {
+  return `${count} foto${count === 1 ? "" : "s"}`;
 }
 
 function HistoryFilterField({ label, children }: { label: string; children: React.ReactNode }) {
@@ -180,6 +193,10 @@ export default function RecordsHistoryPage() {
   const [editingUpdateText, setEditingUpdateText] = useState("");
   const [savingUpdateEdit, setSavingUpdateEdit] = useState(false);
   const [deletingUpdateId, setDeletingUpdateId] = useState<string | null>(null);
+  const [newFlowFiles, setNewFlowFiles] = useState<File[]>([]);
+  const [editingKeptPhotos, setEditingKeptPhotos] = useState<AttachmentRef[]>([]);
+  const [editingNewFiles, setEditingNewFiles] = useState<File[]>([]);
+  const [viewerPhoto, setViewerPhoto] = useState<AttachmentRef | null>(null);
   const [updatingStatus, setUpdatingStatus] = useState(false);
   const [users, setUsers] = useState<User[]>([]);
   const [updatingResponsible, setUpdatingResponsible] = useState(false);
@@ -334,6 +351,7 @@ export default function RecordsHistoryPage() {
             text: d.data().text as string,
             authorName: d.data().authorName as string,
             createdAt: (d.data().createdAt as Timestamp) || null,
+            attachments: Array.isArray(d.data().attachments) ? (d.data().attachments as AttachmentRef[]) : [],
           }))
         );
       }
@@ -341,20 +359,60 @@ export default function RecordsHistoryPage() {
     return () => unsub();
   }, [selectedId]);
 
+  /** Uploads sequentially; on any failure the photos already sent in this attempt are removed. */
+  async function uploadFlowPhotos(files: File[], recordId: string): Promise<UploadedPhoto[]> {
+    if (!user) throw new Error("Faça login novamente.");
+    const uploaded: UploadedPhoto[] = [];
+    try {
+      for (const file of files) {
+        const id = crypto.randomUUID().replace(/-/g, "");
+        uploaded.push(await uploadAttachment(file, user.uid, recordId, id, () => {}));
+      }
+      return uploaded;
+    } catch (error) {
+      await discardFlowPhotos(uploaded);
+      throw Object.assign(error instanceof Error ? error : new Error("upload"), { isUpload: true });
+    }
+  }
+
+  async function discardFlowPhotos(photos: UploadedPhoto[]) {
+    if (!user) return;
+    for (const { attachment, recoveryKey } of photos) {
+      try {
+        if (attachment.path) await deleteOwnedAttachment(attachment.path, user.uid);
+        localStorage.removeItem(recoveryKey);
+      } catch {
+        // Cleanup is best-effort; the recovery journal stays for later cleanup.
+      }
+    }
+  }
+
+  function flowSaveError(error: unknown, fallback: string) {
+    const message = error instanceof Error ? error.message : "";
+    if ((error as { isUpload?: boolean })?.isUpload) {
+      toast.error(`Erro ao enviar as fotos${message ? `: ${message}` : ""}. O texto foi mantido.`);
+    } else {
+      toast.error(fallback);
+    }
+  }
+
   async function addFlowUpdate() {
     if (!selected || !canEdit(selected)) return;
     const text = newFlowUpdateText.trim();
-    if (!text) {
-      toast.error("Digite o texto da atualização");
+    if (!text && newFlowFiles.length === 0) {
+      toast.error("Digite um texto ou adicione ao menos uma foto");
       return;
     }
     setSavingFlowUpdate(true);
+    let uploaded: UploadedPhoto[] = [];
     try {
+      uploaded = await uploadFlowPhotos(newFlowFiles, selected.id);
       const batch = writeBatch(db);
       batch.set(doc(collection(db, "records", selected.id, "updates")), {
         text,
         authorName: profile?.name || user?.email || "Usuário",
         createdAt: serverTimestamp(),
+        attachments: uploaded.map((u) => u.attachment),
       });
       batch.set(doc(logsCol()), buildAuditLogData(
         { uid: user?.uid, name: profile?.name || user?.email || undefined, role: profile?.role },
@@ -364,14 +422,17 @@ export default function RecordsHistoryPage() {
           recordNumber: selected.recordNumber,
           statusBefore: selected.status,
           statusAfter: selected.status,
-          detail: text,
+          detail: [text, uploaded.length ? flowPhotosLabel(uploaded.length) : ""].filter(Boolean).join(" · "),
         }
       ));
       await batch.commit();
+      uploaded.forEach((u) => localStorage.removeItem(u.recoveryKey));
       setNewFlowUpdateText("");
+      setNewFlowFiles([]);
       toast.success("Atualização adicionada");
-    } catch {
-      toast.error("Erro ao salvar atualização");
+    } catch (error) {
+      await discardFlowPhotos(uploaded);
+      flowSaveError(error, "Erro ao salvar atualização");
     } finally {
       setSavingFlowUpdate(false);
     }
@@ -380,24 +441,33 @@ export default function RecordsHistoryPage() {
   function startEditFlowUpdate(u: FlowUpdateEntry) {
     setEditingUpdateId(u.id);
     setEditingUpdateText(u.text);
+    setEditingKeptPhotos(u.attachments);
+    setEditingNewFiles([]);
   }
 
   function cancelEditFlowUpdate() {
     setEditingUpdateId(null);
     setEditingUpdateText("");
+    setEditingKeptPhotos([]);
+    setEditingNewFiles([]);
   }
 
   async function saveEditFlowUpdate() {
     if (!selected || !canEdit(selected) || !editingUpdateId) return;
     const text = editingUpdateText.trim();
-    if (!text) {
-      toast.error("Digite o texto da atualização");
+    if (!text && editingKeptPhotos.length === 0 && editingNewFiles.length === 0) {
+      toast.error("Digite um texto ou mantenha ao menos uma foto");
       return;
     }
     setSavingUpdateEdit(true);
+    let uploaded: UploadedPhoto[] = [];
     try {
+      uploaded = await uploadFlowPhotos(editingNewFiles, selected.id);
+      const original = flowUpdates.find((u) => u.id === editingUpdateId)?.attachments ?? [];
+      const removed = original.filter((photo) => !editingKeptPhotos.some((kept) => kept.id === photo.id));
+      const attachments = [...editingKeptPhotos, ...uploaded.map((u) => u.attachment)];
       const batch = writeBatch(db);
-      batch.update(doc(db, "records", selected.id, "updates", editingUpdateId), { text });
+      batch.update(doc(db, "records", selected.id, "updates", editingUpdateId), { text, attachments });
       batch.set(doc(logsCol()), buildAuditLogData(
         { uid: user?.uid, name: profile?.name || user?.email || undefined, role: profile?.role },
         {
@@ -406,14 +476,22 @@ export default function RecordsHistoryPage() {
           recordNumber: selected.recordNumber,
           statusBefore: selected.status,
           statusAfter: selected.status,
-          detail: text,
+          detail: [text, attachments.length ? flowPhotosLabel(attachments.length) : ""].filter(Boolean).join(" · "),
         }
       ));
       await batch.commit();
+      uploaded.forEach((u) => localStorage.removeItem(u.recoveryKey));
+      // Files dropped from the update are removed from Storage only where the current user owns them.
+      if (user) {
+        for (const photo of removed) {
+          if (photo.path) await deleteOwnedAttachment(photo.path, user.uid).catch(() => {});
+        }
+      }
       toast.success("Atualização editada");
       cancelEditFlowUpdate();
-    } catch {
-      toast.error("Erro ao editar atualização");
+    } catch (error) {
+      await discardFlowPhotos(uploaded);
+      flowSaveError(error, "Erro ao editar atualização");
     } finally {
       setSavingUpdateEdit(false);
     }
@@ -433,10 +511,15 @@ export default function RecordsHistoryPage() {
           recordNumber: selected.recordNumber,
           statusBefore: selected.status,
           statusAfter: selected.status,
-          detail: u.text,
+          detail: u.text || flowPhotosLabel(u.attachments.length),
         }
       ));
       await batch.commit();
+      if (user) {
+        for (const photo of u.attachments) {
+          if (photo.path) await deleteOwnedAttachment(photo.path, user.uid).catch(() => {});
+        }
+      }
       toast.success("Atualização excluída");
     } catch {
       toast.error("Erro ao excluir atualização");
@@ -1397,17 +1480,26 @@ export default function RecordsHistoryPage() {
                   <div>
                     <h3 className="mb-2 text-sm font-semibold">Atualizações do Fluxo</h3>
                     {canEdit(selected) && (
-                      <div className="mb-3 flex flex-col gap-2 sm:flex-row">
-                        <textarea
-                          className="flex-1 rounded-lg border border-border bg-background p-2 text-sm"
-                          placeholder="Registre observações, andamento ou ações realizadas..."
-                          value={newFlowUpdateText}
-                          onChange={(e) => setNewFlowUpdateText(e.target.value)}
-                          rows={2}
+                      <div className="mb-3 flex flex-col gap-2">
+                        <div className="flex flex-col gap-2 sm:flex-row">
+                          <textarea
+                            className="flex-1 rounded-lg border border-border bg-background p-2 text-sm"
+                            placeholder="Registre observações, andamento ou ações realizadas..."
+                            value={newFlowUpdateText}
+                            onChange={(e) => setNewFlowUpdateText(e.target.value)}
+                            rows={2}
+                          />
+                          <Button size="sm" onClick={addFlowUpdate} disabled={savingFlowUpdate} className="sm:self-end">
+                            {savingFlowUpdate ? "Salvando..." : "Adicionar"}
+                          </Button>
+                        </div>
+                        <FlowUpdatePhotoPicker
+                          files={newFlowFiles}
+                          disabled={savingFlowUpdate}
+                          onAddFiles={(added) => setNewFlowFiles((prev) => [...prev, ...added])}
+                          onRemoveFile={(index) => setNewFlowFiles((prev) => prev.filter((_, i) => i !== index))}
+                          onOpen={setViewerPhoto}
                         />
-                        <Button size="sm" onClick={addFlowUpdate} disabled={savingFlowUpdate} className="sm:self-end">
-                          Adicionar
-                        </Button>
                       </div>
                     )}
                     {flowUpdates.length === 0 ? (
@@ -1449,6 +1541,15 @@ export default function RecordsHistoryPage() {
                                   onChange={(e) => setEditingUpdateText(e.target.value)}
                                   rows={2}
                                 />
+                                <FlowUpdatePhotoPicker
+                                  existing={editingKeptPhotos}
+                                  files={editingNewFiles}
+                                  disabled={savingUpdateEdit}
+                                  onAddFiles={(added) => setEditingNewFiles((prev) => [...prev, ...added])}
+                                  onRemoveFile={(index) => setEditingNewFiles((prev) => prev.filter((_, i) => i !== index))}
+                                  onRemoveExisting={(id) => setEditingKeptPhotos((prev) => prev.filter((p) => p.id !== id))}
+                                  onOpen={setViewerPhoto}
+                                />
                                 <div className="flex gap-2">
                                   <Button size="sm" onClick={saveEditFlowUpdate} disabled={savingUpdateEdit}>
                                     <Check className="h-3.5 w-3.5" />
@@ -1461,7 +1562,10 @@ export default function RecordsHistoryPage() {
                                 </div>
                               </div>
                             ) : (
-                              <p className="whitespace-pre-wrap text-sm">{u.text}</p>
+                              <>
+                                {u.text && <p className="whitespace-pre-wrap text-sm">{u.text}</p>}
+                                <FlowUpdatePhotoGallery photos={u.attachments} onOpen={setViewerPhoto} />
+                              </>
                             )}
                           </div>
                         ))}
@@ -1584,6 +1688,8 @@ export default function RecordsHistoryPage() {
         </DialogContent>
       </Dialog>
 
+
+      <FlowUpdatePhotoViewer photo={viewerPhoto} onClose={() => setViewerPhoto(null)} />
 
       <ExcelImportDialog
         open={importOpen}

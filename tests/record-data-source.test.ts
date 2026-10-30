@@ -8,7 +8,7 @@ import type { AppRecord, FormField } from "../src/types/index.ts";
 const field: FormField = { id: "source", key: "tipos_de_dados_9", label: "Fonte de Dados", type: "selecao", required: true, order: 10 };
 
 test("real configured key and legacy values share the same display normalization", () => {
-  for (const [raw, expected] of [["RDO", "RDO-INSTALAÇÃO"], ["RDO - Instalação", "RDO-INSTALAÇÃO"], ["SUPERVISORIO-IOT", "IOT"], ["SUPERVISÓRIO-IOT", "IOT"], ["SUPERVISORIO IOT", "IOT"], ["SUPERVISÓRIO IOT", "IOT"], ["Supervisório - BMS", "Supervisório - BMS"]]) {
+  for (const [raw, expected] of [["RDO", "RDO"], ["RDO-INSTALAÇÃO", "RDO-INSTALAÇÃO"], ["RDO - Instalação", "RDO - Instalação"],["SUPERVISORIO-IOT", "IOT"], ["SUPERVISÓRIO-IOT", "IOT"], ["SUPERVISORIO IOT", "IOT"], ["SUPERVISÓRIO IOT", "IOT"], ["Supervisório - BMS", "Supervisório - BMS"]]) {
     assert.equal(formatRecordDataSource({ data: { tipos_de_dados_9: raw } }, [field]), expected);
     assert.equal(formatRecordDataSource({ data: { tipos_de_dados_9: raw } }), expected);
   }
@@ -22,16 +22,16 @@ test("missing, malformed and old blank values never leak object/undefined/null s
 });
 
 test("custom configured key, legacy keys and multiple selections remain supported", () => {
-  assert.equal(formatRecordDataSource({ data: { arbitrary_key: "RDO" } }, [{ ...field, key: "arbitrary_key" }]), "RDO-INSTALAÇÃO");
+  assert.equal(formatRecordDataSource({ data: { arbitrary_key: "RDO" } }, [{ ...field, key: "arbitrary_key" }]), "RDO");
   for (const key of ["fonteDados", "fonte_de_dados", "fonteDeDados", "fonte_dados"]) {
     assert.equal(formatRecordDataSource({ data: { [key]: "SUPERVISORIO IOT" } }, [field]), "IOT");
   }
-  assert.deepEqual(recordDataSources({ data: { tipos_de_dados_9: ["IOT", "SUPERVISÓRIO IOT", "RDO", {}] } }, [field]), ["IOT", "RDO-INSTALAÇÃO"]);
+  assert.deepEqual(recordDataSources({ data: { tipos_de_dados_9: ["IOT", "SUPERVISÓRIO IOT", "RDO", {}] } }, [field]), ["IOT", "RDO"]);
 });
 
 test("dashboard continues to use the real source and macro field definitions", () => {
   const record: AppRecord = { id: "1", authorId: "u", status: "pendente", data: { tipos_de_dados_9: "RDO", sistemas_macro_11: "Climatização" } };
-  assert.equal(buildDistributionData([record], "fonteDados", [field])[0].name, "RDO-INSTALAÇÃO");
+  assert.equal(buildDistributionData([record], "fonteDados", [field])[0].name, "RDO");
   assert.equal(buildDistributionData([record], "sistemaMacro", [{ ...field, key: "sistemas_macro_11", label: "Sistemas MACRO" }])[0].name, "Climatização");
 });
 

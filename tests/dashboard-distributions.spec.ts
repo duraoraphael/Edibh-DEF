@@ -58,7 +58,7 @@ test("six tabs, real columns, labels, sources, tooltip and keyboard", async ({ p
   }
   await page.getByRole("tab", { name: "Fonte de Dados", exact: true }).click();
   await expect(panel.locator(".recharts-xAxis-tick-labels")).toContainText("IOT");
-  await expect(panel.locator(".recharts-xAxis-tick-labels")).toContainText("RDO-INSTALAÇÃO");
+  await expect(panel.locator(".recharts-xAxis-tick-labels")).toContainText("RDO");
   await expect(panel.locator(".recharts-xAxis-tick-labels")).not.toContainText("SUPERVIS");
   await page.getByRole("tab", { name: "Fonte de Dados", exact: true }).press("ArrowRight");
   await expect(page.getByRole("tab", { name: "Gerência", exact: true })).toHaveAttribute("aria-selected", "true");
