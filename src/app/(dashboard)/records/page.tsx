@@ -57,6 +57,7 @@ import {
 import { ExcelImportDialog } from "@/components/records/excel-import-dialog";
 import { RecordRow } from "@/components/records/record-row";
 import { CaseCheckbox } from "@/components/records/case-checkbox";
+import { HISTORY_FILTER_SELECT_CLASS, HistoryFilterField } from "@/components/records/history-filter-parts";
 import { AttachmentImage, AttachmentLink, isImageAttachment } from "@/components/ui/attachment-link";
 import { Checkbox } from "@/components/ui/checkbox";
 import { generateRecordPdf, generateRecordsTablePdf } from "@/lib/pdf";
@@ -109,7 +110,6 @@ type SortKey =
 const DEFAULT_PAGE_SIZE = 20;
 const ALL = "todos";
 const HISTORY_FILTERS_STORAGE_KEY = "records-history-filters-v1";
-const HISTORY_FILTER_SELECT_CLASS = "h-12 rounded-xl border-[#E2E8F0] bg-white px-3.5 text-xs shadow-none [&>span]:line-clamp-2 [&>span]:whitespace-normal [&>span]:text-left";
 
 interface PersistedHistoryFilters {
   search: string;
@@ -138,15 +138,6 @@ type UploadedPhoto = Awaited<ReturnType<typeof uploadAttachment>>;
 
 function flowPhotosLabel(count: number) {
   return `${count} foto${count === 1 ? "" : "s"}`;
-}
-
-function HistoryFilterField({ label, children }: { label: string; children: React.ReactNode }) {
-  return (
-    <div className="min-w-0">
-      <span className="mb-2 block text-xs font-semibold tracking-wide text-[#243247]">{label}</span>
-      {children}
-    </div>
-  );
 }
 
 export default function RecordsHistoryPage() {
