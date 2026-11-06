@@ -46,6 +46,8 @@ import { DEFAULT_FORM_ID, fieldValue, logFirestoreError, migrateLegacyRecordNumb
 import type { AppRecord, FormDefinition, RecordStatus } from "@/types";
 import { cn } from "@/lib/utils";
 import { DistributionChart } from "@/components/dashboard/distribution-chart";
+import { EmittedEquipmentSection } from "@/components/dashboard/emitted-equipment-section";
+import { toEmittedItems } from "@/lib/emitted-equipment";
 import { buildDistributionData, DISTRIBUTION_KEYS, distributionLabels, type DistributionKey } from "@/lib/dashboard-distributions";
 
 const ALL = "todos";
@@ -167,7 +169,9 @@ export default function DashboardPage() {
     [submitted, formDefinition]
   );
 
-  const filtered = useMemo(() => {
+  // Dashboard filters that are not about time. The "emitted equipment" section shares this scope
+  // but owns its own year/month selectors, so it must not receive the date filters below.
+  const scoped = useMemo(() => {
     let list = submitted;
     if (gerenciaFilter !== ALL) list = list.filter((r) => fieldValue(r, "gerencia") === gerenciaFilter);
     if (instalacaoFilter !== ALL) list = list.filter((r) => fieldValue(r, "instalacao") === instalacaoFilter);
@@ -175,6 +179,16 @@ export default function DashboardPage() {
     if (equipamentoFilter !== ALL) list = list.filter((r) => fieldValue(r, "equipamento") === equipamentoFilter);
     if (responsavelFilter !== ALL) list = list.filter((r) => r.authorName === responsavelFilter);
     if (statusFilter !== ALL) list = list.filter((r) => r.status === statusFilter);
+    return list;
+  }, [submitted, gerenciaFilter, instalacaoFilter, sistemaFilter, equipamentoFilter, responsavelFilter, statusFilter]);
+
+  const emittedItems = useMemo(
+    () => toEmittedItems(scoped, (r) => recordDateKey(r, formDefinition?.fields || [])),
+    [scoped, formDefinition]
+  );
+
+  const filtered = useMemo(() => {
+    let list = scoped;
     if (anoFilter !== ALL) list = list.filter((r) => recordDateKey(r, formDefinition?.fields || []).slice(0, 4) === anoFilter);
     if (mesFilter !== ALL) list = list.filter((r) => recordDateKey(r, formDefinition?.fields || []).slice(5, 7) === mesFilter.padStart(2, "0"));
     if (dateFrom || dateTo) {
@@ -185,13 +199,7 @@ export default function DashboardPage() {
     }
     return list;
   }, [
-    submitted,
-    gerenciaFilter,
-    instalacaoFilter,
-    sistemaFilter,
-    equipamentoFilter,
-    responsavelFilter,
-    statusFilter,
+    scoped,
     anoFilter,
     mesFilter,
     dateFrom,
@@ -424,6 +432,8 @@ export default function DashboardPage() {
         )}
 
       </section>
+
+      <EmittedEquipmentSection items={emittedItems} loading={loading} />
 
       {visibleDistribution && (
         <section className="min-w-0" aria-labelledby="distributions-heading">

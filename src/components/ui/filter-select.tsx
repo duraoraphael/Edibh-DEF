@@ -17,8 +17,11 @@ export function FilterSelect({
   allLabel = "Todos",
   includeLabelInAllOption = true,
   className,
+  hideAll = false,
   children,
 }: {
+  /** Omit the "all" option (for selectors that must always hold a value, e.g. year). */
+  hideAll?: boolean;
   label: string;
   value: string;
   onChange: (v: string) => void;
@@ -35,9 +38,11 @@ export function FilterSelect({
         <SelectValue placeholder={label} />
       </SelectTrigger>
       <SelectContent>
-        <SelectItem value={FILTER_ALL}>
-          {includeLabelInAllOption ? `${label}: ${allLabel}` : allLabel}
-        </SelectItem>
+        {!hideAll && (
+          <SelectItem value={FILTER_ALL}>
+            {includeLabelInAllOption ? `${label}: ${allLabel}` : allLabel}
+          </SelectItem>
+        )}
         {options
           ? options.map((o) => (
               <SelectItem key={o} value={o}>
