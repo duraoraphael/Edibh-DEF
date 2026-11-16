@@ -207,6 +207,9 @@ export default function DashboardPage() {
     formDefinition,
   ]);
 
+  // Share the total card scope with record distributions and evolution.
+  const totalRecords = useMemo(() => filtered.filter((r) => r.status !== "rejeitado"), [filtered]);
+
   // KPI counts are computed directly from each record's own `status` field —
   // the single source of truth — rather than cross-referencing the separate
   // `approvals` collection. Previously "Pendentes de Aprovação" counted
@@ -214,24 +217,24 @@ export default function DashboardPage() {
   // whenever an approval doc was missing/out of sync with its record.
   const stats = useMemo(() => {
     // Reprovados are tracked on their own and never counted in the total.
-    const total = filtered.filter((r) => r.status !== "rejeitado").length;
+    const total = totalRecords.length;
     const pendentes = filtered.filter((r) => r.status === "pendente").length;
     const aprovados = filtered.filter((r) => r.status === "aprovado").length;
     const rejeitados = filtered.filter((r) => r.status === "rejeitado").length;
     const andamento = filtered.filter((r) => r.status === "reajuste").length;
     return { total, pendentes, aprovados, rejeitados, andamento };
-  }, [filtered]);
+  }, [filtered, totalRecords]);
 
   const chartData = useMemo(() => {
     const map = new Map<string, number>();
-    filtered.forEach((r) => {
+    totalRecords.forEach((r) => {
       const key = recordDateKey(r, formDefinition?.fields || []);
       const [, month, day] = key.split("-");
       const label = key ? `${Number(day)}/${Number(month)}` : "N/D";
       map.set(label, (map.get(label) || 0) + 1);
     });
     return Array.from(map.entries()).map(([name, total]) => ({ name, total })).reverse();
-  }, [filtered, formDefinition]);
+  }, [totalRecords, formDefinition]);
 
   const pieData = useMemo(() => {
     const map = new Map<RecordStatus, number>();
@@ -246,8 +249,8 @@ export default function DashboardPage() {
   }, [filtered]);
 
   const distributionData = useMemo(
-    () => Object.fromEntries(DISTRIBUTION_KEYS.map((key) => [key, buildDistributionData(filtered, key, formDefinition?.fields)])) as Record<DistributionKey, ReturnType<typeof buildDistributionData>>,
-    [filtered, formDefinition]
+    () => Object.fromEntries(DISTRIBUTION_KEYS.map((key) => [key, buildDistributionData(totalRecords, key, formDefinition?.fields)])) as Record<DistributionKey, ReturnType<typeof buildDistributionData>>,
+    [totalRecords, formDefinition]
   );
 
   const drafts = useMemo(() => records.filter((r) => r.status === "rascunho").slice(0, 6), [records]);
@@ -455,7 +458,7 @@ export default function DashboardPage() {
             </div>
           </div>
           <Card id="distribution-panel" role="tabpanel" aria-labelledby={`distribution-tab-${visibleDistribution}`} className="min-w-0 rounded-2xl p-4 sm:p-6">
-            {loading ? <Skeleton className="h-[350px] w-full md:h-[400px] lg:h-[480px]" /> : distributionData[visibleDistribution].length === 0 ? <EmptyState text="Nenhum dado disponível" /> : <DistributionChart key={visibleDistribution} data={distributionData[visibleDistribution]} totalRecords={filtered.length} label={distributionLabels[visibleDistribution]} />}
+            {loading ? <Skeleton className="h-[350px] w-full md:h-[400px] lg:h-[480px]" /> : distributionData[visibleDistribution].length === 0 ? <EmptyState text="Nenhum dado disponível" /> : <DistributionChart key={visibleDistribution} data={distributionData[visibleDistribution]} totalRecords={totalRecords.length} label={distributionLabels[visibleDistribution]} />}
           </Card>
         </section>
       )}

@@ -26,7 +26,7 @@ test.beforeEach(async ({ page }) => {
   await page.goto("http://dashboard.test/");
   await page.addStyleTag({ content: harness.css });
   await page.evaluate(fixture => { Object.assign(window, { dashboardFixture: fixture }); }, {
-    records: [...records, { ...records[0], id: "draft", status: "rascunho" }],
+    records: [...records, { ...records[0], id: "draft", status: "rascunho" }, { ...records[0], id: "rejected", status: "rejeitado" }],
     fields: [
       { key: "sistema_macro_123", label: "Sistema Macro" },
       { key: "fonte_de_dados_123", label: "Fonte de Dados", options: ["RDO", "SUPERVISORIO-IOT", "SUPERVISÓRIO-IOT", "Manual"] },
