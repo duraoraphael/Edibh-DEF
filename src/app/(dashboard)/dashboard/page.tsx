@@ -50,8 +50,9 @@ import { DistributionChart } from "@/components/dashboard/distribution-chart";
 import { EmittedEquipmentSection } from "@/components/dashboard/emitted-equipment-section";
 import { toEmittedItems } from "@/lib/emitted-equipment";
 import { buildDistributionData, DISTRIBUTION_KEYS, distributionLabels, formatDistributionPercentage, type DistributionKey } from "@/lib/dashboard-distributions";
-import { DrillDownPanel } from "@/components/dashboard/drilldown-panel";
-import { DEFAULT_DRILL_STATE, DRILL_RETURN_KEY, recordsForSelection, type DrillChartId, type DrillPanelState, type DrillSelection } from "@/lib/dashboard-drilldown";
+import { useRouter, useSearchParams } from "next/navigation";
+import { buildDetailHref, describeGlobals, parseDetailQuery, stepFromCategory, type DetailStep, type GlobalFilters } from "@/lib/dashboard-nav";
+import { filterByPeriod, scopeRecords } from "@/lib/dashboard-scope";
 
 const ALL = "todos";
 
@@ -98,10 +99,8 @@ export default function DashboardPage() {
   const [deleting, setDeleting] = useState(false);
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [distributionKey, setDistributionKey] = useState<DistributionKey>("gerencia");
-  const [loadError, setLoadError] = useState(false);
-  const [drill, setDrill] = useState<DrillSelection | null>(null);
-  const [drillState, setDrillState] = useState<DrillPanelState>(DEFAULT_DRILL_STATE);
-  const [drillExpanded, setDrillExpanded] = useState(false);
+  const router = useRouter();
+  const searchParams = useSearchParams();
   const [periodFocus, setPeriodFocus] = useState<number | null>(null);
 
   const [gerenciaFilter, setGerenciaFilter] = useState(ALL);
@@ -132,7 +131,7 @@ export default function DashboardPage() {
         setRecords(snap.docs.map((d) => d.data()));
         setLoading(false);
       },
-      () => { setLoadError(true); setLoading(false); }
+      () => setLoading(false)
     );
     const unsub3 = onSnapshot(doc(db, "settings", "dashboardConfig"), (snap) => {
       if (snap.exists()) {
@@ -155,28 +154,16 @@ export default function DashboardPage() {
     };
   }, []);
 
-  // Returning from a flow opened through the drill-down: put filters, chart tab and panel back exactly as left.
+  // Coming back from a detail page: its URL carries the dashboard-wide filters, restore them once.
   useEffect(() => {
-    let saved: string | null = null;
-    try {
-      saved = window.sessionStorage.getItem(DRILL_RETURN_KEY);
-      window.sessionStorage.removeItem(DRILL_RETURN_KEY);
-    } catch { /* storage unavailable: start from defaults */ }
-    if (!saved) return;
-    try {
-      const state = JSON.parse(saved);
-      const f = state.filters ?? {};
-      /* eslint-disable react-hooks/set-state-in-effect -- one-time restore from sessionStorage on mount */
-      setGerenciaFilter(f.gerencia ?? ALL); setInstalacaoFilter(f.instalacao ?? ALL); setSistemaFilter(f.sistema ?? ALL);
-      setEquipamentoFilter(f.equipamento ?? ALL); setResponsavelFilter(f.responsavel ?? ALL); setStatusFilter(f.status ?? ALL);
-      setAnoFilter(f.ano ?? ALL); setMesFilter(f.mes ?? ALL); setDateFrom(f.dateFrom ?? ""); setDateTo(f.dateTo ?? "");
-      setFiltersOpen(!!state.filtersOpen);
-      if (DISTRIBUTION_KEYS.includes(state.distributionKey)) setDistributionKey(state.distributionKey);
-      if (state.drill?.chart && typeof state.drill.category === "string") setDrill(state.drill);
-      if (state.panel) setDrillState({ ...DEFAULT_DRILL_STATE, ...state.panel });
-      setDrillExpanded(!!state.expanded);
-      /* eslint-enable react-hooks/set-state-in-effect */
-    } catch { /* corrupted snapshot: ignore */ }
+    const { globals: g } = parseDetailQuery(searchParams);
+    /* eslint-disable react-hooks/set-state-in-effect -- one-time restore from the URL on mount */
+    setGerenciaFilter(g.gerencia); setInstalacaoFilter(g.instalacao); setSistemaFilter(g.sistema);
+    setEquipamentoFilter(g.equipamento); setResponsavelFilter(g.responsavel); setStatusFilter(g.status);
+    setAnoFilter(g.ano); setMesFilter(g.mes); setDateFrom(g.dateFrom); setDateTo(g.dateTo);
+    if (describeGlobals(g).length > 0) setFiltersOpen(true);
+    /* eslint-enable react-hooks/set-state-in-effect */
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const submitted = useMemo(() => records.filter((r) => r.status !== "rascunho"), [records]);
@@ -203,41 +190,18 @@ export default function DashboardPage() {
 
   // Dashboard filters that are not about time. The "emitted equipment" section shares this scope
   // but owns its own year/month selectors, so it must not receive the date filters below.
-  const scoped = useMemo(() => {
-    let list = submitted;
-    if (gerenciaFilter !== ALL) list = list.filter((r) => fieldValue(r, "gerencia") === gerenciaFilter);
-    if (instalacaoFilter !== ALL) list = list.filter((r) => fieldValue(r, "instalacao") === instalacaoFilter);
-    if (sistemaFilter !== ALL) list = list.filter((r) => fieldValue(r, "sistema") === sistemaFilter);
-    if (equipamentoFilter !== ALL) list = list.filter((r) => fieldValue(r, "equipamento") === equipamentoFilter);
-    if (responsavelFilter !== ALL) list = list.filter((r) => r.authorName === responsavelFilter);
-    if (statusFilter !== ALL) list = list.filter((r) => r.status === statusFilter);
-    return list;
-  }, [submitted, gerenciaFilter, instalacaoFilter, sistemaFilter, equipamentoFilter, responsavelFilter, statusFilter]);
+  const globals = useMemo<GlobalFilters>(
+    () => ({ gerencia: gerenciaFilter, instalacao: instalacaoFilter, sistema: sistemaFilter, equipamento: equipamentoFilter, responsavel: responsavelFilter, status: statusFilter, ano: anoFilter, mes: mesFilter, dateFrom, dateTo }),
+    [gerenciaFilter, instalacaoFilter, sistemaFilter, equipamentoFilter, responsavelFilter, statusFilter, anoFilter, mesFilter, dateFrom, dateTo]
+  );
+  const scoped = useMemo(() => scopeRecords(submitted, globals), [submitted, globals]);
 
   const emittedItems = useMemo(
     () => toEmittedItems(scoped, (r) => recordDateKey(r, formDefinition?.fields || [])),
     [scoped, formDefinition]
   );
 
-  const filtered = useMemo(() => {
-    let list = scoped;
-    if (anoFilter !== ALL) list = list.filter((r) => recordDateKey(r, formDefinition?.fields || []).slice(0, 4) === anoFilter);
-    if (mesFilter !== ALL) list = list.filter((r) => recordDateKey(r, formDefinition?.fields || []).slice(5, 7) === mesFilter.padStart(2, "0"));
-    if (dateFrom || dateTo) {
-      list = list.filter((r) => {
-        const date = recordDateKey(r, formDefinition?.fields || []);
-        return !!date && (!dateFrom || date >= dateFrom) && (!dateTo || date <= dateTo);
-      });
-    }
-    return list;
-  }, [
-    scoped,
-    anoFilter,
-    mesFilter,
-    dateFrom,
-    dateTo,
-    formDefinition,
-  ]);
+  const filtered = useMemo(() => filterByPeriod(scoped, globals, formDefinition?.fields || []), [scoped, globals, formDefinition]);
 
   // Share the total card scope with record distributions and evolution.
   const totalRecords = useMemo(() => filtered.filter((r) => r.status !== "rejeitado"), [filtered]);
@@ -320,41 +284,9 @@ export default function DashboardPage() {
     }
   }
 
-  const drillScope = useMemo(
-    () => (drill ? recordsForSelection(drill, { totalRecords, filtered }, formDefinition?.fields ?? []) : null),
-    [drill, totalRecords, filtered, formDefinition]
-  );
-  const drillChartTitle = !drill ? "" : drill.chart === "periodo" ? chartMeta.periodo : drill.chart === "status" ? chartMeta.status : `Distribuição por ${distributionLabels[drill.chart]}`;
-  const contextFilters = [
-    gerenciaFilter !== ALL && `Gerência: ${gerenciaFilter}`,
-    instalacaoFilter !== ALL && `Instalação: ${instalacaoFilter}`,
-    sistemaFilter !== ALL && `Sistema: ${sistemaFilter}`,
-    equipamentoFilter !== ALL && `Equipamento: ${equipamentoFilter}`,
-    responsavelFilter !== ALL && `Responsável: ${responsavelFilter}`,
-    statusFilter !== ALL && `Status: ${statusLabels[statusFilter as RecordStatus] ?? statusFilter}`,
-    anoFilter !== ALL && `Ano: ${anoFilter}`,
-    mesFilter !== ALL && `Mês: ${new Date(2000, Number(mesFilter) - 1, 1).toLocaleDateString("pt-BR", { month: "long" })}`,
-    dateFrom && `De: ${dateFrom.split("-").reverse().join("/")}`,
-    dateTo && `Até: ${dateTo.split("-").reverse().join("/")}`,
-    drill && drill.chart !== "status" && "Exclui fluxos reprovados (como o total)",
-  ].filter((item): item is string => !!item);
-  const drillNote = !drill ? undefined
-    : drill.chart === "fonteDados" ? "Cada fluxo é contado uma vez por fonte selecionada; um fluxo com mais de uma fonte aparece em mais de uma coluna."
-    : drill.chart === "periodo" && drill.category !== "N/D" ? "O gráfico agrupa por dia/mês, sem considerar o ano."
-    : undefined;
-
-  function openDrill(chart: DrillChartId, category: string) {
-    setDrill({ chart, category });
-    setDrillState((state) => ({ ...DEFAULT_DRILL_STATE, pageSize: state.pageSize }));
-  }
-
-  function rememberDashboardState() {
-    try {
-      window.sessionStorage.setItem(DRILL_RETURN_KEY, JSON.stringify({
-        filters: { gerencia: gerenciaFilter, instalacao: instalacaoFilter, sistema: sistemaFilter, equipamento: equipamentoFilter, responsavel: responsavelFilter, status: statusFilter, ano: anoFilter, mes: mesFilter, dateFrom, dateTo },
-        filtersOpen, distributionKey, drill, panel: drillState, expanded: drillExpanded,
-      }));
-    } catch { /* storage unavailable: the dashboard simply opens at its defaults */ }
+  // Every clickable chart opens the dedicated detail page, carrying the dashboard-wide filters in the URL.
+  function openDetail(steps: DetailStep[], day = "") {
+    router.push(buildDetailHref({ steps, globals, day }));
   }
 
   const activeFilterCount = [
@@ -477,7 +409,7 @@ export default function DashboardPage() {
                   setPeriodFocus((index) => Math.min(chartData.length - 1, Math.max(0, (index ?? (step > 0 ? -1 : chartData.length)) + step)));
                 } else if (event.key === "Enter" && periodFocus !== null && chartData[periodFocus]) {
                   event.preventDefault();
-                  openDrill("periodo", chartData[periodFocus].name);
+                  openDetail([], chartData[periodFocus].name);
                 }
               }}
             >
@@ -490,7 +422,7 @@ export default function DashboardPage() {
                 <ResponsiveContainer width="100%" height="100%">
                   <AreaChart data={chartData} margin={{ left: -16, right: 8, top: 16 }} style={{ cursor: "pointer" }} onClick={(state) => {
                     const index = Number(state?.activeTooltipIndex);
-                    if (Number.isInteger(index) && chartData[index]) openDrill("periodo", chartData[index].name);
+                    if (Number.isInteger(index) && chartData[index]) openDetail([], chartData[index].name);
                   }}>
                     <defs><linearGradient id="recordsFill" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="#0e7a4b" stopOpacity={0.22} /><stop offset="100%" stopColor="#0e7a4b" stopOpacity={0.02} /></linearGradient></defs>
                     <CartesianGrid strokeDasharray="3 3" stroke="#e8ecea" vertical={false} />
@@ -518,7 +450,7 @@ export default function DashboardPage() {
               ) : pieData.length === 0 ? (
                 <EmptyState text="Nenhum dado disponível" />
               ) : (
-                <DistributionList data={pieData.map((item) => ({ name: item.name, total: item.value, indicatorClass: item.indicatorClass }))} selected={drill?.chart === "status" ? drill.category : null} onSelect={(name) => openDrill("status", name)} />
+                <DistributionList data={pieData.map((item) => ({ name: item.name, total: item.value, indicatorClass: item.indicatorClass }))} onSelect={(name) => openDetail([stepFromCategory("status", name)])} />
               )}
             </CardContent>
           </Card>
@@ -548,7 +480,7 @@ export default function DashboardPage() {
             </div>
           </div>
           <Card id="distribution-panel" role="tabpanel" aria-labelledby={`distribution-tab-${visibleDistribution}`} className="min-w-0 rounded-2xl p-4 sm:p-6">
-            {loading ? <Skeleton className="h-[350px] w-full md:h-[400px] lg:h-[480px]" /> : distributionData[visibleDistribution].length === 0 ? <EmptyState text="Nenhum dado disponível" /> : <DistributionChart key={visibleDistribution} data={distributionData[visibleDistribution]} totalRecords={totalRecords.length} label={distributionLabels[visibleDistribution]} selected={drill?.chart === visibleDistribution ? drill.category : null} onSelect={(name) => openDrill(visibleDistribution, name)} />}
+            {loading ? <Skeleton className="h-[350px] w-full md:h-[400px] lg:h-[480px]" /> : distributionData[visibleDistribution].length === 0 ? <EmptyState text="Nenhum dado disponível" /> : <DistributionChart key={visibleDistribution} data={distributionData[visibleDistribution]} totalRecords={totalRecords.length} label={distributionLabels[visibleDistribution]} onSelect={(name) => openDetail([{ dim: visibleDistribution, value: name }])} />}
           </Card>
         </section>
       )}
@@ -613,27 +545,6 @@ export default function DashboardPage() {
           </CardContent>
         </Card>
       </section>
-
-      {drill && drillScope && (
-        <DrillDownPanel
-          open
-          chartTitle={drillChartTitle}
-          category={drill.category}
-          records={drillScope.records}
-          baseCount={drillScope.base.length}
-          fields={formDefinition?.fields ?? []}
-          contextFilters={contextFilters}
-          note={drillNote}
-          loading={loading}
-          error={loadError}
-          expanded={drillExpanded}
-          onExpandedChange={setDrillExpanded}
-          state={drillState}
-          onStateChange={setDrillState}
-          onOpenRecord={rememberDashboardState}
-          onClose={() => setDrill(null)}
-        />
-      )}
 
       <Dialog open={configOpen} onOpenChange={setConfigOpen}>
         <DialogContent>

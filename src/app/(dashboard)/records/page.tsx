@@ -21,7 +21,6 @@ import {
   ArrowDown,
   ArrowUp,
   ArrowUpDown,
-  CalendarDays,
   Check,
   ChevronDown,
   Copy,
@@ -57,7 +56,7 @@ import {
 import { ExcelImportDialog } from "@/components/records/excel-import-dialog";
 import { RecordRow } from "@/components/records/record-row";
 import { CaseCheckbox } from "@/components/records/case-checkbox";
-import { HISTORY_FILTER_SELECT_CLASS, HistoryFilterField } from "@/components/records/history-filter-parts";
+import { HISTORY_FILTER_SELECT_CLASS, HistoryDateRange, HistoryFilterField, HistorySearchInput } from "@/components/records/history-filter-parts";
 import { AttachmentImage, AttachmentLink, isImageAttachment } from "@/components/ui/attachment-link";
 import { Checkbox } from "@/components/ui/checkbox";
 import { generateRecordPdf, generateRecordsTablePdf } from "@/lib/pdf";
@@ -68,7 +67,6 @@ import {
   FlowUpdatePhotoViewer,
 } from "@/components/records/flow-update-photos";
 import type { AppRecord, AttachmentRef, FormDefinition, FormField, LogEntry, RecordStatus, User } from "@/types";
-import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { StatusBadge } from "@/components/ui/status-badge";
@@ -985,7 +983,8 @@ export default function RecordsHistoryPage() {
     setSelected(null);
     if (!searchParams.has("record")) return;
     const returnTo = searchParams.get("returnTo");
-    if (returnTo === "/cases" || returnTo === "/dashboard") {
+    // Only same-site dashboard paths are accepted as a return target (no external redirects).
+    if (returnTo === "/cases" || (returnTo && /^\/dashboard(\/detalhamento)?(\?[^#]*)?$/.test(returnTo))) {
       router.replace(returnTo);
     } else if (returnTo === "/records") {
       router.back();
@@ -1104,16 +1103,12 @@ export default function RecordsHistoryPage() {
 
       <div className="flex flex-col gap-3">
         <div className="flex flex-col gap-3 sm:flex-row">
-          <div className="relative min-w-0 flex-1">
-            <Search className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-[#64748B]" />
-            <Input
-              className="h-12 rounded-xl border-[#E2E8F0] bg-white pl-11 pr-4 shadow-sm placeholder:text-[#64748B] focus-visible:border-primary focus-visible:ring-primary/20"
-              placeholder="Buscar por ID, instalação, sistema, equipamento, gerência, responsável ou status..."
-              aria-label="Buscar no histórico"
-              value={search}
-              onChange={(e) => resetPage(setSearch)(e.target.value)}
-            />
-          </div>
+          <HistorySearchInput
+            placeholder="Buscar por ID, instalação, sistema, equipamento, gerência, responsável ou status..."
+            aria-label="Buscar no histórico"
+            value={search}
+            onChange={(e) => resetPage(setSearch)(e.target.value)}
+          />
           <Button
             className="h-12 min-w-36 justify-between rounded-xl border-primary-100 bg-primary-50 px-4 text-primary-800 shadow-none hover:bg-primary-100"
             variant="outline"
@@ -1172,23 +1167,7 @@ export default function RecordsHistoryPage() {
             </div>
 
             <div className="mt-5 flex flex-col gap-4 border-t border-[#E2E8F0] pt-5 lg:flex-row lg:items-end lg:justify-between">
-              <div className="min-w-0 flex-1 rounded-xl border border-[#E2E8F0] bg-[#F6F8FA] p-4">
-                <div className="mb-3 flex items-center gap-2 text-sm font-semibold text-[#243247]">
-                  <CalendarDays className="h-4 w-4 text-primary" />
-                  <span>Período</span>
-                </div>
-                <div className="grid grid-cols-1 items-center gap-2 sm:grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] sm:gap-3">
-                  <div className="relative min-w-0">
-                    <CalendarDays className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-[#64748B]" />
-                    <Input id="history-date-from" aria-label="Data inicial do período" lang="pt-BR" type="date" value={dateFrom} onChange={(e) => resetPage(setDateFrom)(e.target.value)} title="Período de" className="h-11 rounded-xl border-[#E2E8F0] bg-white pl-10 shadow-none" />
-                  </div>
-                  <span className="text-center text-sm text-[#64748B]">até</span>
-                  <div className="relative min-w-0">
-                    <CalendarDays className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-[#64748B]" />
-                    <Input id="history-date-to" aria-label="Data final do período" lang="pt-BR" type="date" value={dateTo} onChange={(e) => resetPage(setDateTo)(e.target.value)} title="Período até" className="h-11 rounded-xl border-[#E2E8F0] bg-white pl-10 shadow-none" />
-                  </div>
-                </div>
-              </div>
+              <HistoryDateRange idPrefix="history" from={dateFrom} to={dateTo} onFromChange={resetPage(setDateFrom)} onToChange={resetPage(setDateTo)} />
               <Button type="button" variant="outline" onClick={clearFilters} disabled={!hasActiveCriteria} className="h-11 w-full rounded-xl border-[#E2E8F0] bg-white px-4 text-[#243247] shadow-none hover:bg-[#F6F8FA] lg:w-auto">
                 <RotateCcw className="h-4 w-4 text-[#64748B]" />
                 Limpar Filtros

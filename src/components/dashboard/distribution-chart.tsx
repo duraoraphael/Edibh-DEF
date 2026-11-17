@@ -51,7 +51,7 @@ function DistributionTooltip({ active, payload }: { active?: boolean; payload?: 
   );
 }
 
-export function DistributionChart({ data, totalRecords, label, onSelect, selected }: { data: DistributionDatum[]; totalRecords: number; label: string; onSelect?: (name: string) => void; selected?: string | null }) {
+export function DistributionChart({ data, totalRecords, label, onSelect, selected, compact }: { data: DistributionDatum[]; totalRecords: number; label: string; onSelect?: (name: string) => void; selected?: string | null; compact?: boolean }) {
   const { ceiling, ticks } = distributionScale(data);
   return (
     <div className="min-w-0">
@@ -61,7 +61,7 @@ export function DistributionChart({ data, totalRecords, label, onSelect, selecte
       </div>
       <p className="mb-2 text-xs text-muted-foreground">Quantidade de registros</p>
       <div role="region" aria-label={`Gráfico de distribuição por ${label}; role horizontalmente para ver todas as categorias`} tabIndex={0} className="max-w-full overflow-x-auto rounded-sm focus-visible:outline-2 focus-visible:outline-ring">
-        <div className="h-[350px] w-full md:h-[400px] lg:h-[480px]" style={{ minWidth: data.length * 128 + 72 }}>
+        <div className={compact ? "h-[320px] w-full" : "h-[350px] w-full md:h-[400px] lg:h-[480px]"} style={{ minWidth: data.length * 128 + 72 }}>
           <ResponsiveContainer width="100%" height="100%">
             <BarChart data={data} margin={{ top: 40, right: 16, bottom: 12, left: 0 }} accessibilityLayer>
               <CartesianGrid vertical={false} stroke="var(--border)" strokeDasharray="3 4" />

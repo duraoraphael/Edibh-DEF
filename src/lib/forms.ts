@@ -221,9 +221,9 @@ export const roleLabels: Record<UserRole, string> = {
 /** Routes each role may access. `null` = all authenticated users. Used by both sidebar and route-guard. */
 export const allowedRoutesByRole: Record<UserRole, string[] | null> = {
   admin: null,
-  gerente: ["/dashboard", "/cases", "/records", "/records/new", "/forms", "/approvals", "/profile", "/email", "/sharepoint", "/audit"],
-  visualizador: ["/dashboard", "/records"],
-  tecnico: ["/dashboard", "/cases", "/records", "/records/new", "/profile", "/audit"],
+  gerente: ["/dashboard", "/dashboard/detalhamento", "/cases", "/records", "/records/new", "/forms", "/approvals", "/profile", "/email", "/sharepoint", "/audit"],
+  visualizador: ["/dashboard", "/dashboard/detalhamento", "/records"],
+  tecnico: ["/dashboard", "/dashboard/detalhamento", "/cases", "/records", "/records/new", "/profile", "/audit"],
 };
 
 export function isRouteAllowed(role: UserRole | undefined, pathname: string): boolean {

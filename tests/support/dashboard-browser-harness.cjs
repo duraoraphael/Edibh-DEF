@@ -10,9 +10,18 @@ module.exports = async function buildDashboardHarness() {
   await fs.mkdir(output, { recursive: true });
   const files = {
     'loader.cjs': `const ts = require('typescript'); module.exports = function(source) { return ts.transpileModule(source, { compilerOptions: { jsx: ts.JsxEmit.ReactJSX, module: ts.ModuleKind.ESNext, target: ts.ScriptTarget.ES2020 }, fileName: this.resourcePath }).outputText; };`,
-    'auth.js': `export const useAuth = () => ({ profile: { role: 'visualizador' } });`,
+    'auth.js': `export const useAuth = () => ({ profile: { role: 'visualizador', name: 'Teste' }, user: { email: 'teste@example.com' } });`,
     'firebase.js': `export const db = {}; export const auth = { currentUser: null };`,
-    'link.js': `import React from 'react'; export default function Link(props) { return React.createElement('a', props); }`,
+    'link.js': `import React from 'react'; import { nav } from './navigation.js'; export default function Link({ href, onClick, ...props }) { return React.createElement('a', { href, ...props, onClick: (event) => { onClick?.(event); if (event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || !String(href).startsWith('/')) return; event.preventDefault(); nav.push(href); } }); }`,
+    'navigation.js': `import React from 'react';
+      const listeners = new Set(); const emit = () => listeners.forEach(listener => listener());
+      window.addEventListener('popstate', emit);
+      export const nav = { push(href) { history.pushState({}, '', href); emit(); }, replace(href) { history.replaceState({}, '', href); emit(); }, back() { history.back(); } };
+      export const useLocation = () => React.useSyncExternalStore(cb => { listeners.add(cb); return () => listeners.delete(cb); }, () => location.pathname + location.search);
+      export const useRouter = () => nav;
+      export const usePathname = () => { useLocation(); return location.pathname; };
+      export const useSearchParams = () => { const search = useLocation(); return React.useMemo(() => new URLSearchParams(location.search), [search]); };`,
+    'excel.js': `export async function exportRecordsToExcel(options) { window.__exported = options; }`,
     'firestore.js': `
       export const collection = (_, name) => ({ name, withConverter() { return this; } });
       export const doc = (_, ...parts) => ({ name: parts.join('/') });
@@ -31,7 +40,10 @@ module.exports = async function buildDashboardHarness() {
         return () => {};
       }
     `,
-    'entry.js': `import React from 'react'; import { createRoot } from 'react-dom/client'; import Dashboard from '@/app/(dashboard)/dashboard/page'; createRoot(document.getElementById('root')).render(React.createElement(Dashboard));`,
+    'entry.js': `import React from 'react'; import { createRoot } from 'react-dom/client'; import Dashboard from '@/app/(dashboard)/dashboard/page'; import Detail from '@/app/(dashboard)/dashboard/detalhamento/page'; import { nav, useLocation, usePathname } from './navigation.js';
+      function Records() { const params = new URLSearchParams(location.search); return React.createElement('div', { 'data-testid': 'records-stub' }, React.createElement('p', null, 'Ficha ' + params.get('record')), React.createElement('button', { onClick: () => nav.replace(params.get('returnTo')) }, 'Fechar ficha')); }
+      function App() { useLocation(); const path = usePathname(); const Page = path === '/records' ? Records : path.startsWith('/dashboard/detalhamento') ? Detail : Dashboard; return React.createElement(Page, { key: path }); }
+      createRoot(document.getElementById('root')).render(React.createElement(App));`,
   };
   await Promise.all(Object.entries(files).map(([name, content]) => fs.writeFile(path.join(output, name), content)));
   await new Promise((resolve, reject) => {
@@ -43,6 +55,8 @@ module.exports = async function buildDashboardHarness() {
         '@/lib/firebase$': path.join(output, 'firebase.js'),
         'firebase/firestore$': path.join(output, 'firestore.js'),
         'next/link$': path.join(output, 'link.js'),
+        'next/navigation$': path.join(output, 'navigation.js'),
+        '@/lib/excel-export$': path.join(output, 'excel.js'),
         '@': path.join(root, 'src'),
       } },
       module: { rules: [{ test: /\.tsx?$/, exclude: /node_modules/, use: path.join(output, 'loader.cjs') }] },
