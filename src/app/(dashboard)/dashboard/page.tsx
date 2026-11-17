@@ -19,6 +19,7 @@ import {
   Area,
   AreaChart,
   CartesianGrid,
+  ReferenceLine,
   ResponsiveContainer,
   Tooltip,
   XAxis,
@@ -48,7 +49,9 @@ import { cn } from "@/lib/utils";
 import { DistributionChart } from "@/components/dashboard/distribution-chart";
 import { EmittedEquipmentSection } from "@/components/dashboard/emitted-equipment-section";
 import { toEmittedItems } from "@/lib/emitted-equipment";
-import { buildDistributionData, DISTRIBUTION_KEYS, distributionLabels, type DistributionKey } from "@/lib/dashboard-distributions";
+import { buildDistributionData, DISTRIBUTION_KEYS, distributionLabels, formatDistributionPercentage, type DistributionKey } from "@/lib/dashboard-distributions";
+import { DrillDownPanel } from "@/components/dashboard/drilldown-panel";
+import { DEFAULT_DRILL_STATE, DRILL_RETURN_KEY, recordsForSelection, type DrillChartId, type DrillPanelState, type DrillSelection } from "@/lib/dashboard-drilldown";
 
 const ALL = "todos";
 
@@ -95,6 +98,11 @@ export default function DashboardPage() {
   const [deleting, setDeleting] = useState(false);
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [distributionKey, setDistributionKey] = useState<DistributionKey>("gerencia");
+  const [loadError, setLoadError] = useState(false);
+  const [drill, setDrill] = useState<DrillSelection | null>(null);
+  const [drillState, setDrillState] = useState<DrillPanelState>(DEFAULT_DRILL_STATE);
+  const [drillExpanded, setDrillExpanded] = useState(false);
+  const [periodFocus, setPeriodFocus] = useState<number | null>(null);
 
   const [gerenciaFilter, setGerenciaFilter] = useState(ALL);
   const [instalacaoFilter, setInstalacaoFilter] = useState(ALL);
@@ -124,7 +132,7 @@ export default function DashboardPage() {
         setRecords(snap.docs.map((d) => d.data()));
         setLoading(false);
       },
-      () => setLoading(false)
+      () => { setLoadError(true); setLoading(false); }
     );
     const unsub3 = onSnapshot(doc(db, "settings", "dashboardConfig"), (snap) => {
       if (snap.exists()) {
@@ -145,6 +153,30 @@ export default function DashboardPage() {
       unsub3();
       unsub4();
     };
+  }, []);
+
+  // Returning from a flow opened through the drill-down: put filters, chart tab and panel back exactly as left.
+  useEffect(() => {
+    let saved: string | null = null;
+    try {
+      saved = window.sessionStorage.getItem(DRILL_RETURN_KEY);
+      window.sessionStorage.removeItem(DRILL_RETURN_KEY);
+    } catch { /* storage unavailable: start from defaults */ }
+    if (!saved) return;
+    try {
+      const state = JSON.parse(saved);
+      const f = state.filters ?? {};
+      /* eslint-disable react-hooks/set-state-in-effect -- one-time restore from sessionStorage on mount */
+      setGerenciaFilter(f.gerencia ?? ALL); setInstalacaoFilter(f.instalacao ?? ALL); setSistemaFilter(f.sistema ?? ALL);
+      setEquipamentoFilter(f.equipamento ?? ALL); setResponsavelFilter(f.responsavel ?? ALL); setStatusFilter(f.status ?? ALL);
+      setAnoFilter(f.ano ?? ALL); setMesFilter(f.mes ?? ALL); setDateFrom(f.dateFrom ?? ""); setDateTo(f.dateTo ?? "");
+      setFiltersOpen(!!state.filtersOpen);
+      if (DISTRIBUTION_KEYS.includes(state.distributionKey)) setDistributionKey(state.distributionKey);
+      if (state.drill?.chart && typeof state.drill.category === "string") setDrill(state.drill);
+      if (state.panel) setDrillState({ ...DEFAULT_DRILL_STATE, ...state.panel });
+      setDrillExpanded(!!state.expanded);
+      /* eslint-enable react-hooks/set-state-in-effect */
+    } catch { /* corrupted snapshot: ignore */ }
   }, []);
 
   const submitted = useMemo(() => records.filter((r) => r.status !== "rascunho"), [records]);
@@ -288,6 +320,43 @@ export default function DashboardPage() {
     }
   }
 
+  const drillScope = useMemo(
+    () => (drill ? recordsForSelection(drill, { totalRecords, filtered }, formDefinition?.fields ?? []) : null),
+    [drill, totalRecords, filtered, formDefinition]
+  );
+  const drillChartTitle = !drill ? "" : drill.chart === "periodo" ? chartMeta.periodo : drill.chart === "status" ? chartMeta.status : `Distribuição por ${distributionLabels[drill.chart]}`;
+  const contextFilters = [
+    gerenciaFilter !== ALL && `Gerência: ${gerenciaFilter}`,
+    instalacaoFilter !== ALL && `Instalação: ${instalacaoFilter}`,
+    sistemaFilter !== ALL && `Sistema: ${sistemaFilter}`,
+    equipamentoFilter !== ALL && `Equipamento: ${equipamentoFilter}`,
+    responsavelFilter !== ALL && `Responsável: ${responsavelFilter}`,
+    statusFilter !== ALL && `Status: ${statusLabels[statusFilter as RecordStatus] ?? statusFilter}`,
+    anoFilter !== ALL && `Ano: ${anoFilter}`,
+    mesFilter !== ALL && `Mês: ${new Date(2000, Number(mesFilter) - 1, 1).toLocaleDateString("pt-BR", { month: "long" })}`,
+    dateFrom && `De: ${dateFrom.split("-").reverse().join("/")}`,
+    dateTo && `Até: ${dateTo.split("-").reverse().join("/")}`,
+    drill && drill.chart !== "status" && "Exclui fluxos reprovados (como o total)",
+  ].filter((item): item is string => !!item);
+  const drillNote = !drill ? undefined
+    : drill.chart === "fonteDados" ? "Cada fluxo é contado uma vez por fonte selecionada; um fluxo com mais de uma fonte aparece em mais de uma coluna."
+    : drill.chart === "periodo" && drill.category !== "N/D" ? "O gráfico agrupa por dia/mês, sem considerar o ano."
+    : undefined;
+
+  function openDrill(chart: DrillChartId, category: string) {
+    setDrill({ chart, category });
+    setDrillState((state) => ({ ...DEFAULT_DRILL_STATE, pageSize: state.pageSize }));
+  }
+
+  function rememberDashboardState() {
+    try {
+      window.sessionStorage.setItem(DRILL_RETURN_KEY, JSON.stringify({
+        filters: { gerencia: gerenciaFilter, instalacao: instalacaoFilter, sistema: sistemaFilter, equipamento: equipamentoFilter, responsavel: responsavelFilter, status: statusFilter, ano: anoFilter, mes: mesFilter, dateFrom, dateTo },
+        filtersOpen, distributionKey, drill, panel: drillState, expanded: drillExpanded,
+      }));
+    } catch { /* storage unavailable: the dashboard simply opens at its defaults */ }
+  }
+
   const activeFilterCount = [
     gerenciaFilter,
     instalacaoFilter,
@@ -395,20 +464,41 @@ export default function DashboardPage() {
               <CardTitle>{chartMeta.periodo}</CardTitle>
               <p className="text-sm text-muted-foreground">Volume de novos registros no período filtrado</p>
             </CardHeader>
-            <CardContent className="h-80">
+            <CardContent
+              className="h-80 rounded-sm focus-visible:outline-2 focus-visible:outline-ring"
+              tabIndex={chartData.length ? 0 : undefined}
+              aria-label={chartData.length ? "Evolução de registros por dia. Use as setas para escolher um dia e Enter para ver os fluxos." : undefined}
+              onBlur={() => setPeriodFocus(null)}
+              onKeyDown={(event) => {
+                if (!chartData.length || event.target !== event.currentTarget) return;
+                if (event.key === "ArrowRight" || event.key === "ArrowLeft") {
+                  event.preventDefault();
+                  const step = event.key === "ArrowRight" ? 1 : -1;
+                  setPeriodFocus((index) => Math.min(chartData.length - 1, Math.max(0, (index ?? (step > 0 ? -1 : chartData.length)) + step)));
+                } else if (event.key === "Enter" && periodFocus !== null && chartData[periodFocus]) {
+                  event.preventDefault();
+                  openDrill("periodo", chartData[periodFocus].name);
+                }
+              }}
+            >
+              {periodFocus !== null && chartData[periodFocus] && <p className="sr-only" aria-live="polite">{chartData[periodFocus].name}: {chartData[periodFocus].total} registros. Pressione Enter para ver os fluxos.</p>}
               {loading ? (
                 <Skeleton className="h-full w-full" />
               ) : chartData.length === 0 ? (
                 <EmptyState text="Nenhum registro encontrado" />
               ) : (
                 <ResponsiveContainer width="100%" height="100%">
-                  <AreaChart data={chartData} margin={{ left: -16, right: 8, top: 16 }}>
+                  <AreaChart data={chartData} margin={{ left: -16, right: 8, top: 16 }} style={{ cursor: "pointer" }} onClick={(state) => {
+                    const index = Number(state?.activeTooltipIndex);
+                    if (Number.isInteger(index) && chartData[index]) openDrill("periodo", chartData[index].name);
+                  }}>
                     <defs><linearGradient id="recordsFill" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="#0e7a4b" stopOpacity={0.22} /><stop offset="100%" stopColor="#0e7a4b" stopOpacity={0.02} /></linearGradient></defs>
                     <CartesianGrid strokeDasharray="3 3" stroke="#e8ecea" vertical={false} />
                     <XAxis dataKey="name" fontSize={11} stroke="#7b8580" tickLine={false} axisLine={false} />
                     <YAxis fontSize={11} stroke="#7b8580" allowDecimals={false} tickLine={false} axisLine={false} />
-                    <Tooltip />
-                    <Area type="monotone" dataKey="total" stroke="#0e7a4b" strokeWidth={2} fill="url(#recordsFill)" />
+                    <Tooltip content={<PeriodTooltip total={totalRecords.length} />} />
+                    {periodFocus !== null && chartData[periodFocus] && <ReferenceLine x={chartData[periodFocus].name} stroke="#0e7a4b" strokeDasharray="4 3" />}
+                    <Area type="monotone" dataKey="total" stroke="#0e7a4b" strokeWidth={2} fill="url(#recordsFill)" activeDot={{ r: 5, cursor: "pointer" }} />
                   </AreaChart>
                 </ResponsiveContainer>
               )}
@@ -428,7 +518,7 @@ export default function DashboardPage() {
               ) : pieData.length === 0 ? (
                 <EmptyState text="Nenhum dado disponível" />
               ) : (
-                <DistributionList data={pieData.map((item) => ({ name: item.name, total: item.value, indicatorClass: item.indicatorClass }))} />
+                <DistributionList data={pieData.map((item) => ({ name: item.name, total: item.value, indicatorClass: item.indicatorClass }))} selected={drill?.chart === "status" ? drill.category : null} onSelect={(name) => openDrill("status", name)} />
               )}
             </CardContent>
           </Card>
@@ -458,7 +548,7 @@ export default function DashboardPage() {
             </div>
           </div>
           <Card id="distribution-panel" role="tabpanel" aria-labelledby={`distribution-tab-${visibleDistribution}`} className="min-w-0 rounded-2xl p-4 sm:p-6">
-            {loading ? <Skeleton className="h-[350px] w-full md:h-[400px] lg:h-[480px]" /> : distributionData[visibleDistribution].length === 0 ? <EmptyState text="Nenhum dado disponível" /> : <DistributionChart key={visibleDistribution} data={distributionData[visibleDistribution]} totalRecords={totalRecords.length} label={distributionLabels[visibleDistribution]} />}
+            {loading ? <Skeleton className="h-[350px] w-full md:h-[400px] lg:h-[480px]" /> : distributionData[visibleDistribution].length === 0 ? <EmptyState text="Nenhum dado disponível" /> : <DistributionChart key={visibleDistribution} data={distributionData[visibleDistribution]} totalRecords={totalRecords.length} label={distributionLabels[visibleDistribution]} selected={drill?.chart === visibleDistribution ? drill.category : null} onSelect={(name) => openDrill(visibleDistribution, name)} />}
           </Card>
         </section>
       )}
@@ -524,6 +614,27 @@ export default function DashboardPage() {
         </Card>
       </section>
 
+      {drill && drillScope && (
+        <DrillDownPanel
+          open
+          chartTitle={drillChartTitle}
+          category={drill.category}
+          records={drillScope.records}
+          baseCount={drillScope.base.length}
+          fields={formDefinition?.fields ?? []}
+          contextFilters={contextFilters}
+          note={drillNote}
+          loading={loading}
+          error={loadError}
+          expanded={drillExpanded}
+          onExpandedChange={setDrillExpanded}
+          state={drillState}
+          onStateChange={setDrillState}
+          onOpenRecord={rememberDashboardState}
+          onClose={() => setDrill(null)}
+        />
+      )}
+
       <Dialog open={configOpen} onOpenChange={setConfigOpen}>
         <DialogContent>
           <DialogHeader>
@@ -582,14 +693,34 @@ export default function DashboardPage() {
   );
 }
 
-function DistributionList({ data }: { data: { name: string; total: number; indicatorClass?: string }[] }) {
+function DistributionList({ data, selected, onSelect }: { data: { name: string; total: number; indicatorClass?: string }[]; selected?: string | null; onSelect?: (name: string) => void }) {
   const total = data.reduce((sum, item) => sum + item.total, 0);
   return (
-    <div className="flex max-h-80 flex-col gap-4 overflow-y-auto pr-2">
+    <div className="flex max-h-80 flex-col gap-2 overflow-y-auto pr-2">
       {data.map((item) => {
         const percentage = total ? Math.round((item.total / total) * 1000) / 10 : 0;
-        return <div key={item.name}><div className="mb-1.5 flex items-center justify-between gap-3 text-sm"><span className="truncate text-foreground" title={item.name}>{item.name}</span><span className="shrink-0 tabular-nums text-muted-foreground"><strong className="font-medium text-foreground">{item.total}</strong> · {percentage}%</span></div><div className="h-1.5 overflow-hidden rounded-sm bg-muted"><div className={cn("h-full rounded-sm", item.indicatorClass || "bg-primary/75")} style={{ width: `${percentage}%` }} /></div></div>;
+        const isSelected = selected === item.name;
+        return (
+          <button key={item.name} type="button" onClick={() => onSelect?.(item.name)} aria-pressed={isSelected} aria-label={`Ver fluxos: ${item.name}, ${item.total} registros, ${percentage}%`} title="Clique para ver os fluxos"
+            className={cn("-mx-2 rounded-md px-2 py-1 text-left transition-colors hover:bg-muted/60 focus-visible:outline-2 focus-visible:outline-ring", isSelected && "bg-primary-50 ring-1 ring-primary/40", selected && !isSelected && "opacity-60")}>
+            <div className="mb-1.5 flex items-center justify-between gap-3 text-sm"><span className="truncate text-foreground" title={item.name}>{item.name}</span><span className="shrink-0 tabular-nums text-muted-foreground"><strong className="font-medium text-foreground">{item.total}</strong> · {percentage}%</span></div>
+            <div className="h-1.5 overflow-hidden rounded-sm bg-muted"><div className={cn("h-full rounded-sm", item.indicatorClass || "bg-primary/75")} style={{ width: `${percentage}%` }} /></div>
+          </button>
+        );
       })}
+    </div>
+  );
+}
+
+function PeriodTooltip({ active, payload, total }: { active?: boolean; payload?: ReadonlyArray<{ payload?: { name: string; total: number } }>; total: number }) {
+  const item = payload?.[0]?.payload;
+  if (!active || !item) return null;
+  return (
+    <div role="tooltip" className="rounded-lg border border-border bg-card p-3 text-sm shadow-md">
+      <p className="font-medium">{item.name}</p>
+      <p className="mt-1 tabular-nums">{item.total.toLocaleString("pt-BR")} {item.total === 1 ? "registro" : "registros"}</p>
+      <p className="tabular-nums text-muted-foreground">{formatDistributionPercentage(total ? item.total / total * 100 : 0)} do total</p>
+      <p className="mt-1 text-xs text-primary">Clique para ver os fluxos</p>
     </div>
   );
 }

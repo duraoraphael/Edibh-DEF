@@ -985,7 +985,7 @@ export default function RecordsHistoryPage() {
     setSelected(null);
     if (!searchParams.has("record")) return;
     const returnTo = searchParams.get("returnTo");
-    if (returnTo === "/cases") {
+    if (returnTo === "/cases" || returnTo === "/dashboard") {
       router.replace(returnTo);
     } else if (returnTo === "/records") {
       router.back();

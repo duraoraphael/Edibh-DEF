@@ -30,11 +30,33 @@ function matchesField(value: string, dimension: DistributionKey) {
     : name === normalizedName(dimension) || (dimension === "sistemaMacro" && name === "sistemasmacro");
 }
 
+function distributionField(dimension: DistributionKey, fields: FormField[]) {
+  if (dimension === "fonteDados") return findDataSourceField(fields);
+  return dimension === "sistemaMacro" ? fields.find((item) => matchesField(item.label, dimension) || matchesField(item.key, dimension)) : undefined;
+}
+
+/**
+ * Category names a record contributes to for one dimension. Shared by the chart aggregation and the
+ * drill-down so that a bar's count and the records listed behind it can never diverge.
+ * Only "Fonte de Dados" can return more than one name (a flow may list several sources).
+ */
+export function recordDistributionNames(record: AppRecord, dimension: DistributionKey, fields: FormField[] = [], field = distributionField(dimension, fields)): string[] {
+  if (dimension === "fonteDados") return recordDataSources(record, fields);
+  const key = dimension === "sistemaMacro" ? field?.key ?? Object.keys(record.data ?? {}).find((name) => matchesField(name, dimension)) : dimension;
+  const raw = dimension === "responsavel" ? record.authorName : key ? record.data?.[key] : undefined;
+  return [(Array.isArray(raw) ? raw.join(", ") : raw == null ? "" : String(raw)) || "N/D"];
+}
+
+/** Records behind one category of a distribution chart. */
+export function recordsForDistribution(records: AppRecord[], dimension: DistributionKey, category: string, fields: FormField[] = []): AppRecord[] {
+  const field = distributionField(dimension, fields);
+  return records.filter((record) => recordDistributionNames(record, dimension, fields, field).includes(category));
+}
+
 /** Pure display aggregation: callers supply the dashboard's already-filtered records. */
 export function buildDistributionData(records: AppRecord[], dimension: DistributionKey, fields: FormField[] = []): DistributionDatum[] {
   if (!records.length) return [];
-  const dynamic = dimension === "fonteDados" || dimension === "sistemaMacro";
-  const field = dimension === "fonteDados" ? findDataSourceField(fields) : dynamic ? fields.find((item) => matchesField(item.label, dimension) || matchesField(item.key, dimension)) : undefined;
+  const field = distributionField(dimension, fields);
   const counts = new Map<string, number>();
   // Keep configured source options visible, including options with zero selections.
   if (dimension === "fonteDados") {
@@ -43,20 +65,9 @@ export function buildDistributionData(records: AppRecord[], dimension: Distribut
       if (name) counts.set(name, 0);
     });
   }
-
   for (const record of records) {
-    const key = dynamic
-      ? field?.key ?? Object.keys(record.data ?? {}).find((name) => matchesField(name, dimension))
-      : dimension;
-    const raw = dimension === "responsavel" ? record.authorName : key ? record.data?.[key] : undefined;
-    if (dimension === "fonteDados") {
-      // Equivalent aliases selected on one record still represent one record.
-      const selections = recordDataSources(record, fields);
-      selections.forEach((name) => counts.set(name, (counts.get(name) ?? 0) + 1));
-    } else {
-      const name = (Array.isArray(raw) ? raw.join(", ") : raw == null ? "" : String(raw)) || "N/D";
-      counts.set(name, (counts.get(name) ?? 0) + 1);
-    }
+    // Equivalent aliases selected on one record still represent one record.
+    for (const name of recordDistributionNames(record, dimension, fields, field)) counts.set(name, (counts.get(name) ?? 0) + 1);
   }
   return Array.from(counts, ([name, total]) => ({ name, total, percentage: total / records.length * 100 }))
     .sort((a, b) => b.total - a.total || a.name.localeCompare(b.name, "pt-BR"));
