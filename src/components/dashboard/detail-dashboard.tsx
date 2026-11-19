@@ -16,6 +16,7 @@ import { db } from "@/lib/firebase";
 import { useAuth } from "@/lib/auth-context";
 import { exportRecordsToExcel } from "@/lib/excel-export";
 import { recordsCol } from "@/lib/firestore-helpers";
+import { canonicalizeAuthorNames } from "@/lib/person-name";
 import { DEFAULT_FORM_ID, statusLabels } from "@/lib/forms";
 import { buildDistributionData, type DistributionDatum, type DistributionKey } from "@/lib/dashboard-distributions";
 import { filterDrillRows, periodLabel, toDrillRow } from "@/lib/dashboard-drilldown";
@@ -60,7 +61,7 @@ export function DetailDashboard() {
   useEffect(() => {
     const unsubRecords = onSnapshot(
       query(recordsCol(), orderBy("createdAt", "desc")),
-      (snap) => { setRecords(snap.docs.map((d) => d.data())); setLoading(false); },
+      (snap) => { setRecords(canonicalizeAuthorNames(snap.docs.map((d) => d.data()))); setLoading(false); },
       () => { setError(true); setLoading(false); }
     );
     const unsubForm = onSnapshot(

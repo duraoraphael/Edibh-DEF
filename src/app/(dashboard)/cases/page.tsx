@@ -7,6 +7,7 @@ import { BriefcaseBusiness, CalendarDays, ChevronDown, Database, RotateCcw, Sear
 import { toast } from "sonner";
 import { db } from "@/lib/firebase";
 import { recordsCol, setRecordCase } from "@/lib/firestore-helpers";
+import { canonicalizeAuthorNames, uniquePersonNames } from "@/lib/person-name";
 import { canEditRecord } from "@/lib/access-policy";
 import { recordDataSources } from "@/lib/data-source";
 import { DEFAULT_FORM_ID, fieldValue, formatRecordDate, getFirebaseErrorMessage, logFirestoreError, recordDateKey, statusLabels } from "@/lib/forms";
@@ -170,7 +171,7 @@ export default function CasesPage() {
           .map((item) => item.data())
           .filter((record) => !record.deletedAt)
           .sort((a, b) => String(b.updatedAt || b.createdAt || "").localeCompare(String(a.updatedAt || a.createdAt || "")));
-        setRecords(cases);
+        setRecords(canonicalizeAuthorNames(cases));
         setError(null);
         setLoading(false);
       },
@@ -183,7 +184,7 @@ export default function CasesPage() {
     return () => unsubscribe();
   }, []);
 
-  const responsaveis = useMemo(() => Array.from(new Set(records.map((r) => r.authorName).filter(Boolean))) as string[], [records]);
+  const responsaveis = useMemo(() => uniquePersonNames(records.map((r) => r.authorName)), [records]);
   const gerencias = useMemo(() => distinctFieldValues(records, "gerencia"), [records]);
   const instalacoes = useMemo(() => distinctFieldValues(records, "instalacao"), [records]);
   const sistemas = useMemo(() => distinctFieldValues(records, "sistema"), [records]);

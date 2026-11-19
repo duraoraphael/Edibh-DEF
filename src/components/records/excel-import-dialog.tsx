@@ -2,11 +2,12 @@
 
 import { useMemo, useState } from "react";
 import * as XLSX from "xlsx";
-import { writeBatch, doc, deleteDoc } from "firebase/firestore";
+import { writeBatch, doc, deleteDoc, getDocs } from "firebase/firestore";
 import { toast } from "sonner";
 import { Upload, Loader2, AlertTriangle, CheckCircle2, FileSpreadsheet, X, Trash2 } from "lucide-react";
 import { db } from "@/lib/firebase";
-import { recordsCol } from "@/lib/firestore-helpers";
+import { recordsCol, usersCol } from "@/lib/firestore-helpers";
+import { buildPersonNameMap, normalizePersonName } from "@/lib/person-name";
 import { reserveSequentialNumbers, slugifyKey } from "@/lib/forms";
 import type { AppRecord, RecordStatus } from "@/types";
 import { Button } from "@/components/ui/button";
@@ -248,6 +249,24 @@ export function ExcelImportDialog({
       });
       const recordNumbers = await reserveSequentialNumbers(validRows.length);
 
+      // One spelling per person: registered users win, otherwise the most frequent variant in the sheet.
+      // Only the name is unified; authorId must stay the importer's uid (firestore.rules requires it).
+      const sheetNames = buildPersonNameMap(validRows.map((row) => cellValue(row, mapping.responsavel)));
+      const registeredNames = new Map<string, string>();
+      try {
+        const usersSnap = await getDocs(usersCol());
+        for (const item of usersSnap.docs) {
+          const user = item.data();
+          if (user.name && user.status !== "inativo") registeredNames.set(normalizePersonName(user.name), user.name.trim());
+        }
+      } catch {
+        // Users are only used to pick the canonical spelling; fall back to the sheet's own names.
+      }
+      const canonicalResponsavel = (raw: string) => {
+        const key = normalizePersonName(raw);
+        return registeredNames.get(key) ?? sheetNames.get(key) ?? raw;
+      };
+
       let batch = writeBatch(db);
       let opsInBatch = 0;
       for (let i = 0; i < validRows.length; i += 1) {
@@ -276,7 +295,7 @@ export function ExcelImportDialog({
           recordNumber: recordNumbers[i],
           status,
           authorId: authorId || "import",
-          authorName: cellValue(row, mapping.responsavel),
+          authorName: canonicalResponsavel(cellValue(row, mapping.responsavel)),
           formId,
           data: {
             instalacao: cellValue(row, mapping.instalacao),

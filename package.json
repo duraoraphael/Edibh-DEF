@@ -13,7 +13,7 @@
     "test:drilldown": "node --experimental-strip-types --import ./tests/support/register.mjs --test tests/dashboard-drilldown.test.ts",
     "test:emitted": "node --experimental-strip-types --import ./tests/support/register.mjs --test tests/emitted-equipment.test.ts",
     "test:email": "node --experimental-strip-types --import ./tests/support/register.mjs --test tests/email-inline.test.ts",
-    "test:record-number": "node --experimental-strip-types --import ./tests/support/register.mjs --test tests/record-number.test.ts",
+    "test:record-number": "node --experimental-strip-types --import ./tests/support/register.mjs --test tests/record-number.test.ts tests/person-name.test.ts",
     "test:records": "npm run build && node --experimental-strip-types --import ./tests/support/register.mjs --test tests/record-data-source.test.ts && firebase emulators:exec --only auth,firestore,storage --project demo-upload-fix \"node --experimental-strip-types --experimental-test-module-mocks --import ./tests/support/register.mjs --test --test-concurrency=1 tests/firestore-rules.test.ts tests/record-upload.integration.test.ts && playwright test --config tests/records.playwright.config.ts\"",
     "test:security": "node --experimental-strip-types --import ./tests/support/register.mjs --test tests/security.test.ts",
     "test:attachment-url": "node --experimental-strip-types --import ./tests/support/register.mjs --test tests/attachment-url.test.ts",

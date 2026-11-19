@@ -41,6 +41,7 @@ import { canEditRecord } from "@/lib/access-policy";
 import { formatRecordDataSource, isDataSourceField, recordDataSources } from "@/lib/data-source";
 import { db } from "@/lib/firebase";
 import { buildAuditLogData, logsCol, recordsCol, setRecordCase, usersCol, writeAuditLog } from "@/lib/firestore-helpers";
+import { canonicalizeAuthorNames, uniquePersonNames } from "@/lib/person-name";
 import { useAuth } from "@/lib/auth-context";
 import {
   DEFAULT_FORM_ID,
@@ -293,7 +294,7 @@ export default function RecordsHistoryPage() {
     const unsub = onSnapshot(
       query(recordsCol(), orderBy("createdAt", "desc")),
       (snap) => {
-        const nextRecords = snap.docs.map((d) => d.data());
+        const nextRecords = canonicalizeAuthorNames(snap.docs.map((d) => d.data()));
         setRecords(nextRecords);
         if (requestedRecordId) {
           setSelected(nextRecords.find((record) => record.id === requestedRecordId && !record.deletedAt) || null);
@@ -649,7 +650,7 @@ export default function RecordsHistoryPage() {
   );
 
   const responsaveis = useMemo(
-    () => Array.from(new Set(submitted.map((r) => r.authorName).filter(Boolean))) as string[],
+    () => uniquePersonNames(submitted.map((r) => r.authorName)),
     [submitted]
   );
   const gerencias = useMemo(() => distinct("gerencia"), [distinct]);

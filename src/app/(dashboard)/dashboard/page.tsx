@@ -43,6 +43,7 @@ import {
 import { db } from "@/lib/firebase";
 import { useAuth } from "@/lib/auth-context";
 import { recordsCol } from "@/lib/firestore-helpers";
+import { canonicalizeAuthorNames, uniquePersonNames } from "@/lib/person-name";
 import { DEFAULT_FORM_ID, fieldValue, logFirestoreError, migrateLegacyRecordNumbers, recordDateKey, statusIndicatorClass, statusLabels, statusVariant } from "@/lib/forms";
 import type { AppRecord, FormDefinition, RecordStatus } from "@/types";
 import { cn } from "@/lib/utils";
@@ -128,7 +129,7 @@ export default function DashboardPage() {
     const unsub1 = onSnapshot(
       query(recordsCol(), orderBy("createdAt", "desc")),
       (snap) => {
-        setRecords(snap.docs.map((d) => d.data()));
+        setRecords(canonicalizeAuthorNames(snap.docs.map((d) => d.data())));
         setLoading(false);
       },
       () => setLoading(false)
@@ -177,7 +178,7 @@ export default function DashboardPage() {
   const sistemas = useMemo(() => distinct("sistema"), [distinct]);
   const equipamentos = useMemo(() => distinct("equipamento"), [distinct]);
   const responsaveis = useMemo(
-    () => Array.from(new Set(submitted.map((r) => r.authorName).filter(Boolean))) as string[],
+    () => uniquePersonNames(submitted.map((r) => r.authorName)),
     [submitted]
   );
   const anos = useMemo(

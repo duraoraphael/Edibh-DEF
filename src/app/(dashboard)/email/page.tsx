@@ -7,6 +7,7 @@ import { toast } from "sonner";
 import { Download, Mail, X } from "lucide-react";
 import { db } from "@/lib/firebase";
 import { emailLogsCol, recordsCol, usersCol } from "@/lib/firestore-helpers";
+import { canonicalizeAuthorNames } from "@/lib/person-name";
 import { useAuth } from "@/lib/auth-context";
 import { DEFAULT_FORM_ID, logFirestoreError, statusLabels, statusVariant } from "@/lib/forms";
 import type { AppRecord, FormDefinition, User } from "@/types";
@@ -63,7 +64,7 @@ export default function EmailPage() {
     const unsub = onSnapshot(
       query(recordsCol(), orderBy("createdAt", "desc")),
       (snap) => {
-        setRecords(snap.docs.map((d) => d.data()).filter((r) => r.status !== "rascunho"));
+        setRecords(canonicalizeAuthorNames(snap.docs.map((d) => d.data()).filter((r) => r.status !== "rascunho")));
         setLoading(false);
       },
       () => setLoading(false)
